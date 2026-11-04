@@ -68,7 +68,10 @@ input[type=range]{width:100%}
 
 <script>
 /* ================= الإعدادات ================= */
-const W=1080,H=1920,N=8,L=7.5,TR=1.2,TOTAL=N*L;      // 9:16، 8 مشاهد، 60 ثانية
+const W=1080,H=1920,N=8,TR=1.2;
+// بداية كل مشهد بالثانية، مضبوطة على جمل المعلق الصوتي
+const STARTS=[0,6.0,11.2,15.9,21.0,26.2,30.9,36.6],TOTAL=46.6;
+const DUR=STARTS.map((s,i)=>(i<N-1?STARTS[i+1]:TOTAL)-s);      // 9:16، 8 مشاهد، 60 ثانية
 const GOLD='#d6b765',GOLD_HI='#ffdf91',CREAM='#fff6dc',SOFT='#dfc58d';
 const $=id=>document.getElementById(id);
 const canvas=$('stage');canvas.width=W;canvas.height=H;
@@ -112,6 +115,7 @@ const LANTERNS=[
  {x:130,len:700,s:1.0,ph:0},{x:320,len:960,s:1.15,ph:1.3},{x:540,len:640,s:1.3,ph:2.1},
  {x:760,len:1000,s:1.15,ph:.6},{x:950,len:780,s:1.0,ph:2.8}
 ];
+const SPARKS=Array.from({length:30},()=>({an:rnd()*6.283,d:300+rnd()*750,a:.4+rnd()*.6,r:2+rnd()*4}));
 const DATES=[[-190,-14],[-95,-30],[0,-40],[95,-30],[190,-14],[-140,18],[-45,14],[45,14],[140,18]];
 
 /* ================= رسم عام ================= */
@@ -449,10 +453,11 @@ const SCENES=[sceneIntro,sceneLanterns,sceneQuran,sceneMosque,sceneIftar,sceneGi
 
 /* ================= التركيب والانتقالات ================= */
 let fadeOn=false;                         // الظلام في البداية يُفعَّل عند التشغيل/التصدير فقط
-function drawScene(i,lt,a,zoom){
+function drawScene(i,lt,a,z){
  if(a<=.001)return;
  ctx.save();
  ctx.globalAlpha=a;
+ const zoom=z*(1+.03*clamp(lt/DUR[i]));   // تكبير بطيء داخل المشهد
  if(zoom!==1){ctx.translate(W/2,H/2);ctx.scale(zoom,zoom);ctx.translate(-W/2,-H/2);}
  SCENES[i](lt);
  ctx.restore();
@@ -474,20 +479,41 @@ function drawOverlay(t){
  if(t>TOTAL-1)black=Math.max(black,(t-(TOTAL-1))/1);
  if(black>0){ctx.fillStyle=`rgba(0,0,0,${black})`;ctx.fillRect(0,0,W,H);}
 }
+// وميض وشرارات عند بداية كل مشهد
+function drawFlare(lt){
+ const p=clamp(lt/1.4),a=1-p;
+ if(a<=0)return;
+ ctx.save();
+ ctx.globalAlpha=a*.9;
+ ctx.translate(lerp(-400,W+400,easeOut(p)),H/2);ctx.rotate(-.5);
+ const sg=ctx.createLinearGradient(-180,0,180,0);
+ sg.addColorStop(0,'rgba(255,240,200,0)');sg.addColorStop(.5,'rgba(255,240,200,.22)');sg.addColorStop(1,'rgba(255,240,200,0)');
+ ctx.fillStyle=sg;ctx.fillRect(-180,-1400,360,2800);
+ ctx.restore();
+ ctx.save();ctx.translate(W/2,H/2);ctx.fillStyle=GOLD_HI;
+ for(const s of SPARKS){
+  const r=easeOut(p)*s.d;
+  ctx.globalAlpha=a*s.a;
+  ctx.beginPath();ctx.arc(Math.cos(s.an)*r,Math.sin(s.an)*r,s.r*(1-p*.5),0,Math.PI*2);ctx.fill();
+ }
+ ctx.restore();
+}
 function render(t){
  t=clamp(t,0,TOTAL);
  ctx.setTransform(1,0,0,1,0,0);ctx.globalAlpha=1;
  ctx.drawImage(sky,0,0);
  drawStars(t);
- const i=Math.min(N-1,Math.floor(t/L));
- const lt=t-i*L;
+ let i=0;
+ while(i<N-1&&t>=STARTS[i+1])i++;
+ const lt=t-STARTS[i];
  if(i>0&&lt<TR){
   const k=ease(lt/TR);
-  drawScene(i-1,L+lt,1-k,1);          // المشهد السابق يتلاشى
-  drawScene(i,lt,k,1+.06*(1-k));       // المشهد الجديد يكبر بسلاسة
+  drawScene(i-1,t-STARTS[i-1],1-k,1);       // المشهد السابق يتلاشى
+  drawScene(i,lt,k,1+.05*(1-k));             // المشهد الجديد يكبر بسلاسة
  }else{
   drawScene(i,lt,1,1);
  }
+ if(i>0&&lt<1.4)drawFlare(lt);
  drawOverlay(t);
 }
 
