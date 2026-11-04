@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>اليوم الوطني السعودي | رسم يدوي</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Amiri:wght@700&family=Cairo:wght@700;900&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:#efe6cf;color:#2a2a26;font-family:Cairo,Tahoma,Arial,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:16px}
+.app{width:min(100%,430px)}
+.video{position:relative;width:100%;aspect-ratio:9/16;overflow:hidden;border:1px solid #b8892e;border-radius:14px;box-shadow:0 0 30px rgba(0,0,0,.2);background:#f6efdc}
+#stage{position:absolute;inset:0;width:100%;height:100%;display:block}
+.controls{display:grid;gap:10px;padding-top:14px}
+.track{height:5px;background:#d7c9a4;border-radius:8px;overflow:hidden}
+#bar{height:100%;width:0;background:#0c6b3c}
+#clock{text-align:center;font-size:14px;color:#5a5140}
+.row{display:flex;gap:8px}
+.row button{flex:1}
+button{background:#0c6b3c;color:#fff;border:0;padding:13px;border-radius:10px;font:inherit;font-size:15px;font-weight:700;cursor:pointer}
+#status{text-align:center;font-size:13px;color:#5a5140;min-height:1.6em}
+</style>
+</head>
+<body>
+<div class="app">
+ <div class="video"><canvas id="stage" aria-label="معاينة فيديو اليوم الوطني"></canvas></div>
+ <div class="controls">
+  <div class="track"><div id="bar"></div></div>
+  <div id="clock">00:00 / 01:00</div>
+  <div class="row">
+   <button id="play">▶ تشغيل</button>
+   <button id="reset">↻ إعادة</button>
+  </div>
+  <div id="status">جاهز للتشغيل</div>
+ </div>
+</div>
+
+<script>
+/* ================= التوقيت ================= */
+const W=1080,H=1920,TOTAL=60,TR=0.9,N=8;
+const STARTS=[0,7.5,15,22.5,30,37.5,45,52.5];
+const DUR=STARTS.map((s,i)=>(i<N-1?STARTS[i+1]:TOTAL)-s);
+const EVENTS=[];
+for(let i=0;i<N;i++){EVENTS.push({t:STARTS[i]+0.2,k:'pen',d:3.4});if(i>0)EVENTS.push({t:STARTS[i]-0.2,k:'brush'});}
+[16.0,17.5,19.0,20.5].forEach(t=>EVENTS.push({t,k:'drum'}));
+EVENTS.push({t:21.6,k:'boom'});
+[46.0,48.0,50.5].forEach(t=>EVENTS.push({t,k:'burst'}));
+EVENTS.push({t:46.2,k:'cheer'},{t:49.0,k:'cheer'});
+EVENTS.push({t:52.6,k:'cymbal'},{t:58.6,k:'boom'});
+
+/* ================= أدوات ================= */
+let seed=1932;
+const rnd=()=>(seed=(seed*16807)%2147483647)/2147483647;
+const clamp=(x,a=0,b=1)=>Math.min(b,Math.max(a,x));
+const easeOut=x=>1-Math.pow(1-clamp(x),3);
+const ease=x=>{x=clamp(x);return x*x*(3-2*x)};
+const PAPER='#f6efdc',INK='#2a2a26',GREEN='#0c6b3c',GREEN_LT='#3a9a66',GOLD='#b8892e',CREAM='#fbf7ea',BROWN='#8a5a2b';
+const canvas=document.getElementById('stage');canvas.width=W;canvas.height=H;
+const ctx=canvas.getContext('2d');
+
+// ملمس الورق
+const PAPERTEX=document.createElement('canvas');PAPERTEX.width=W;PAPERTEX.height=H;
+(function(){const g=PAPERTEX.getContext('2d');g.fillStyle=PAPER;g.fillRect(0,0,W,H);
+ const img=g.getImageData(0,0,W,H),d=img.data;
+ for(let i=0;i<d.length;i+=4){const n=(rnd()-.5)*14;d[i]+=n;d[i+1]+=n;d[i+2]+=n*.8;}
+ g.putImageData(img,0,0);
+ for(let k=0;k<700;k++){g.strokeStyle=`rgba(120,95,50,${.03+rnd()*.05})`;g.lineWidth=.6+rnd();
+  const x=rnd()*W,y=rnd()*H;g.beginPath();g.moveTo(x,y);g.quadraticCurveTo(x+(rnd()-.5)*60,y+(rnd()-.5)*60,x+(rnd()-.5)*120,y+(rnd()-.5)*120);g.stroke();}
+ const vg=g.createRadialGradient(W/2,H/2,H*.3,W/2,H/2,H*.8);vg.addColorStop(0,'rgba(0,0,0,0)');vg.addColorStop(1,'rgba(90,60,20,.22)');
+ g.fillStyle=vg;g.fillRect(0,0,W,H);
+})();
+
+/* ================= بناء الخطوط ================= */
+const jit=(pts,a)=>pts.map(([x,y])=>[x+(rnd()-.5)*a,y+(rnd()-.5)*a]);
+function line(x0,y0,x1,y1,n=12){const r=[];for(let i=0;i<=n;i++){const u=i/n;r.push([x0+(x1-x0)*u,y0+(y1-y0)*u]);}return r;}
+function arcP(cx,cy,rx,ry,a0,a1,n=40){const r=[];for(let i=0;i<=n;i++){const a=a0+(a1-a0)*i/n;r.push([cx+Math.cos(a)*rx,cy+Math.sin(a)*ry]);}return r;}
+function poly(pts,close=true,n=8){const r=[];const m=pts.length;
+ for(let i=0;i<(close?m:m-1);i++){const a=pts[i],b=pts[(i+1)%m];for(let k=0;k<n;k++){const u=k/n;r.push([a[0]+(b[0]-a[0])*u,a[1]+(b[1]-a[1])*u]);}}
+ r.push(close?pts[0]:pts[m-1]);return r;}
+function quad(p0,p1,p2,n=30){const r=[];for(let i=0;i<=n;i++){const u=i/n,v=1-u;r.push([v*v*p0[0]+2*v*u*p1[0]+u*u*p2[0],v*v*p0[1]+2*v*u*p1[1]+u*u*p2[1]]);}return r;}
+function S(pts,start,dur,color=INK,w=5,fill=null){return {pts:jit(pts,2.2),start,dur,color,w,fill,len:0,cum:null};}
+const MAP=[[180,700],[330,560],[520,520],[700,540],[860,640],[910,800],[860,930],[900,1020],[820,1120],[640,1190],[430,1210],[300,1160],[220,1000],[170,860]];
+const mapT=(cx,cy,s)=>MAP.map(([x,y])=>[(x-540)*s+cx,(y-860)*s+cy]);
+function building(x,y,w,h,start){
+ const out=[];
+ const top=[];for(let i=0;i<=w;i+=w/6){top.push([x+i,y+(Math.floor(i/(w/6))%2?-22:0)]);}
+ out.push(S(poly([[x,y+h],[x,y],...top.slice(1),[x+w,y+h]],false,4),start,1.4,INK,4,null));
+ out.push(S(arcP(x+w/2,y+h,w*.16,w*.2,Math.PI,2*Math.PI,20),start+1.2,.6,INK,4,null));
+ for(let r=0;r<2;r++)for(let c=0;c<3;c++){const wx=x+w*(.18+c*.3),wy=y+h*(.22+r*.25);
+  out.push(S(arcP(wx,wy,14,14,Math.PI,2*Math.PI,12).concat(poly([[wx-14,wy],[wx-14,wy+22],[wx+14,wy+22],[wx+14,wy]],false,2)),start+1.4+r*.2+c*.1,.6,INK,3,null));}
+ return out;
+}
+function palm(x,f,h,start){
+ const out=[];
+ out.push(S(quad([x,f],[x+30,f-h*.5],[x+8,f-h],30),start,1.2,BROWN,8,null));
+ const angs=[-2.9,-2.4,-1.9,-1.3,-.7,-.2,.3];
+ angs.forEach((a,i)=>{const tx=x+8+Math.cos(a)*130,ty=f-h+Math.sin(a)*70+40;
+  out.push(S(quad([x+8,f-h],[x+8+Math.cos(a)*60,f-h+Math.sin(a)*60-30],[tx,ty],20),start+1.1+i*.12,.7,GREEN,5,null));});
+ return out;
+}
+function manFig(x,f,s,start,color=CREAM){
+ const out=[];
+ out.push(S(arcP(x,f-290*s,36*s,40*s,0,2*Math.PI,28),start,.8,INK,4,null));
+ out.push(S(arcP(x,f-300*s,48*s,40*s,Math.PI,2*Math.PI,22),start+.6,.6,INK,4,color));
+ out.push(S(poly([[x-65*s,f-230*s],[x+65*s,f-230*s],[x+55*s,f],[x-55*s,f]],true,6),start+.9,1,INK,4,color));
+ out.push(S(line(x-62*s,f-220*s,x-82*s,f-130*s,8),start+1.4,.5,INK,4,null));
+ out.push(S(line(x+62*s,f-220*s,x+82*s,f-130*s,8),start+1.5,.5,INK,4,null));
+ return out;
+}
+function womanFig(x,f,s,start){
+ const out=[];
+ out.push(S(arcP(x,f-260*s,32*s,36*s,0,2*Math.PI,28),start,.8,INK,4,null));
+ out.push(S(arcP(x,f-270*s,40*s,44*s,Math.PI,2*Math.PI,22),start+.5,.6,INK,4,'#2d4a3c'));
+ out.push(S(poly([[x-50*s,f-220*s],[x+50*s,f-220*s],[x+85*s,f],[x-85*s,f]],true,6),start+.9,1,INK,4,'#2d4a3c'));
+ return out;
+}
+function raisedFig(x,f,s,start,color){
+ const out=[];
+ out.push(S(arcP(x,f-290*s,36*s,40*s,0,2*Math.PI,28),start,.8,INK,4,null));
+ out.push(S(poly([[x-65*s,f-230*s],[x+65*s,f-230*s],[x+55*s,f],[x-55*s,f]],true,6),start+.7,1,INK,4,color));
+ out.push(S(line(x-60*s,f-220*s,x-90*s,f-420*s,10),start+1.1,.6,INK,4,null));
+ out.push(S(line(x+60*s,f-220*s,x+90*s,f-420*s,10),start+1.2,.6,INK,4,null));
+ return out;
+}
+function flagPole(x,f,h,start){return [S(line(x,f,x,f-h,12),start,.8,INK,5,null)];}
+
+/* ================= المشاهد: الخطوط ================= */
+const SCN=[];
+SCN[0]=[
+ S(poly(MAP,true,8),0.3,3.2,GREEN,7,'rgba(12,107,60,.12)'),
+ S(line(540,1560,540,1620,4),3.6,.1,INK,1,null)
+];
+SCN[1]=[
+ building(190,1000,250,380,0),building(520,880,300,500,.5),
+ palm(120,1400,380,1.2),palm(900,1400,340,1.6),
+ S(line(120,1380,1000,1380,20),0,1.1,BROWN,6,null),
+];
+SCN[2]=[
+ S(poly(mapT(540,700,.55),true,8),0.3,2.2,GREEN,6,'rgba(12,107,60,.12)'),
+ ...manFig(540,1700,1.8,1.5,CREAM),
+];
+SCN[3]=[
+ building(120,1140,160,420,0),building(300,1000,180,560,.4),building(500,860,200,700,.8),
+ building(720,1040,200,520,1.2),building(940,1160,120,400,1.6),
+ S(line(60,1560,1020,1560,30),0,1.3,INK,5,null),
+ S(line(640,520,640,860,8),.5,1.0,INK,4,null),S(line(640,520,780,520,8),1.3,.8,INK,4,null),S(line(780,520,780,600,8),2.0,.5,INK,4,null),
+];
+SCN[4]=[
+ ...manFig(260,1620,1.3,0,CREAM),...womanFig(540,1620,1.2,1.2),...manFig(800,1620,1.1,2.4,'#f3e6c4'),
+ ...flagPole(170,1620,380,3.0),...flagPole(900,1620,380,3.4),
+];
+SCN[5]=[
+ palm(260,1560,420,0),
+ S(quad([60,1450],[300,1330],[540,1440],40),0.8,1.3,BROWN,5,null),
+ S(quad([540,1440],[780,1560],[1020,1420],40),1.4,1.3,BROWN,5,null),
+ S(poly([[80,1240],[280,980],[420,1140],[560,900],[760,1190],[900,1080],[1020,1240]],false,8),1.8,2.2,INK,5,null),
+ S(quad([60,1640],[300,1600],[540,1650],30),2.4,1.2,GREEN_LT,5,null),
+ S(quad([540,1650],[780,1700],[1020,1640],30),2.9,1.2,GREEN_LT,5,null),
+];
+SCN[6]=[
+ raisedFig(260,1700,1.25,0,'#e8d7ad'),raisedFig(540,1700,1.35,.8,'#c7e5d2'),raisedFig(820,1700,1.2,1.6,'#e8d7ad'),
+];
+SCN[7]=[
+ S(arcP(540,880,330,330,0,2*Math.PI,80),0,2.0,GOLD,6,null),
+ S(arcP(540,880,300,300,0,2*Math.PI,80),.4,2.0,GREEN,3,null),
+ S(poly(mapT(540,880,.6),true,8),1.0,2.4,GREEN,6,'rgba(12,107,60,.15)'),
+];
+
+SCN.forEach((a,i)=>{SCN[i]=a.flat();});
+
+/* ================= كتابة النصوص ================= */
+function writeText(s,x,y,size,color,lt,start,dur=1.4){
+ const p=clamp((lt-start)/dur);if(p<=0)return;
+ ctx.save();ctx.font=`700 ${size}px Amiri, Cairo, Tahoma, Arial, sans-serif`;ctx.textAlign='center';ctx.textBaseline='middle';
+ const w=ctx.measureText(s).width+30,e=easeOut(p);
+ const right=x+w/2,left=right-w*e;
+ ctx.beginPath();ctx.rect(left,y-size,w*e+2,size*2);ctx.clip();
+ ctx.fillStyle=color;ctx.fillText(s,x,y);
+ ctx.restore();
+ if(p<1){ctx.save();ctx.fillStyle=INK;ctx.beginPath();ctx.arc(left,y-size*.2,size*.07,0,Math.PI*2);ctx.fill();ctx.restore();}
+}
+const TEXTS=[
+ [{s:'هنا بدأت الحكاية..',x:540,y:330,size:92,color:INK,start:4.6},{s:'وهنا نمت الأحلام',x:540,y:460,size:72,color:GREEN,start:6.0}],
+ [{s:'من جذور التاريخ..',x:540,y:330,size:92,color:INK,start:1.3},{s:'بدأت قصة وطن',x:540,y:460,size:72,color:GREEN,start:2.7}],
+ [{s:'على يد المؤسس..',x:540,y:1770,size:90,color:INK,start:2.0},{s:'توحدت الراية',x:540,y:1880,size:72,color:GREEN,start:3.4}],
+ [{s:'طموح لا يتوقف..',x:540,y:330,size:92,color:INK,start:2.3},{s:'ومستقبل نصنعه',x:540,y:460,size:72,color:GREEN,start:3.7}],
+ [{s:'شعب واحد.. وقلب واحد..',x:540,y:330,size:84,color:INK,start:2.8},{s:'وراية واحدة',x:540,y:460,size:72,color:GREEN,start:4.2}],
+ [{s:'أرض العطاء..',x:540,y:330,size:92,color:INK,start:3.3},{s:'وموطن المجد',x:540,y:460,size:72,color:GREEN,start:4.7}],
+ [{s:'عزّنا بطبعنا..',x:540,y:330,size:92,color:INK,start:3.8},{s:'وفخرنا بوطننا',x:540,y:460,size:72,color:GREEN,start:5.2}],
+ [{s:'عزّنا بطبعنا',x:540,y:1380,size:150,color:GREEN,start:3.0},{s:'اليوم الوطني السعودي',x:540,y:1530,size:70,color:INK,start:4.5},{s:'دام عزك يا وطن',x:540,y:1660,size:80,color:GOLD,start:6.1}],
+];
+
+/* ================= أحداث بصرية إضافية ================= */
+function flagAt(cx,cy,w,h,gt,alpha){
+ if(alpha<=0)return;
+ ctx.save();ctx.globalAlpha=alpha;
+ const top=[],bot=[];
+ for(let i=0;i<=20;i++){const u=i/20,x=cx-w/2+w*u;const amp=14*u;
+  top.push([x,cy-h/2+Math.sin(u*6-gt*4)*amp]);bot.push([x,cy+h/2+Math.sin(u*6-gt*4+.5)*amp]);}
+ ctx.fillStyle=GREEN;ctx.beginPath();ctx.moveTo(...top[0]);top.forEach(p=>ctx.lineTo(...p));bot.reverse().forEach(p=>ctx.lineTo(...p));ctx.closePath();ctx.fill();
+ ctx.fillStyle='#ffffff';ctx.font=`700 ${h*.2}px Amiri, Cairo, Tahoma, Arial, sans-serif`;ctx.textAlign='center';ctx.textBaseline='middle';
+ ctx.fillText('لا إله إلا الله',cx,cy-h*.12);
+ ctx.fillRect(cx-w*.3,cy+h*.12,w*.6,h*.04);
+ ctx.restore();
+}
+function fireworks(lt,gt){
+ [[46.0,260,420],[48.0,820,640],[50.5,540,520]].forEach(([t0,x,y],k)=>{
+  const tau=gt-t0;if(tau<0||tau>1.6)return;
+  const r=340*easeOut(tau/1.2),a=1-tau/1.6;
+  ctx.save();ctx.globalAlpha=a;ctx.lineWidth=5;ctx.lineCap='round';
+  for(let j=0;j<24;j++){const an=j/24*Math.PI*2;ctx.strokeStyle=(j+k)%2?GREEN:'#ffffff';
+   ctx.beginPath();ctx.moveTo(x+Math.cos(an)*r*.4,y+Math.sin(an)*r*.4);ctx.lineTo(x+Math.cos(an)*r,y+Math.sin(an)*r);ctx.stroke();}
+  ctx.restore();
+ });
+}
+function starRing(cx,cy,R,rot,alpha){
+ ctx.save();ctx.globalAlpha=alpha;ctx.strokeStyle=GOLD;ctx.lineWidth=3;ctx.translate(cx,cy);ctx.rotate(rot);
+ ctx.beginPath();for(let i=0;i<16;i++){const r=i%2?R*.55:R,a=i*Math.PI/8;i?ctx.lineTo(Math.cos(a)*r,Math.sin(a)*r):ctx.moveTo(Math.cos(a)*r,Math.sin(a)*r);}
+ ctx.closePath();ctx.stroke();ctx.restore();
+}
+const EXTRA=[
+ (lt,gt)=>flagAt(540,1360,460,280,gt,fadeIn(lt,3.4,.8)),
+ null,
+ (lt,gt)=>flagAt(540,1040,300,190,gt,fadeIn(lt,1.0,.8)),
+ null,
+ (lt,gt)=>{},
+ null,
+ (lt,gt)=>fireworks(lt,gt),
+ (lt,gt)=>{starRing(540,880,330,gt*.12,fadeIn(lt,1,1));flagAt(540,880,280,170,gt,fadeIn(lt,2.5,.8));},
+];
+function fadeIn(lt,s,d){return ease((lt-s)/d);}
+
+/* ================= الرسم ================= */
+function lenOf(s){
+ if(s.cum)return s.len;
+ let L=0;const c=[0];
+ for(let i=1;i<s.pts.length;i++){L+=Math.hypot(s.pts[i][0]-s.pts[i-1][0],s.pts[i][1]-s.pts[i-1][1]);c.push(L);}
+ s.len=L;s.cum=c;return L;
+}
+function drawS(s,lt){
+ const p=clamp((lt-s.start)/s.dur);if(p<=0)return;
+ lenOf(s);
+ const target=p*s.len;
+ ctx.save();ctx.strokeStyle=s.color;ctx.lineWidth=s.w;ctx.lineCap='round';ctx.lineJoin='round';
+ ctx.beginPath();ctx.moveTo(s.pts[0][0],s.pts[0][1]);
+ let head=s.pts[0];
+ for(let i=1;i<s.pts.length;i++){
+  if(s.cum[i]<=target){ctx.lineTo(s.pts[i][0],s.pts[i][1]);head=s.pts[i];}
+  else{const u=(target-s.cum[i-1])/Math.max(1e-6,s.cum[i]-s.cum[i-1]);const a=s.pts[i-1],b=s.pts[i];
+   head=[a[0]+(b[0]-a[0])*u,a[1]+(b[1]-a[1])*u];ctx.lineTo(head[0],head[1]);break;}
+ }
+ ctx.stroke();
+ if(s.fill&&p>=1){const fa=clamp((lt-s.start-s.dur)/.6);ctx.globalAlpha*=fa*(s.fill.startsWith('rgba')?1:.9);
+  ctx.fillStyle=s.fill;ctx.beginPath();ctx.moveTo(s.pts[0][0],s.pts[0][1]);s.pts.forEach(q=>ctx.lineTo(q[0],q[1]));ctx.closePath();ctx.fill();}
+ if(p<1){ctx.fillStyle=INK;ctx.beginPath();ctx.arc(head[0],head[1],s.w*.9,0,Math.PI*2);ctx.fill();}
+ ctx.restore();
+}
+function drawSceneAt(i,lt,gt,clipFn){
+ ctx.save();
+ if(clipFn)clipFn();
+ SCN[i].forEach(s=>drawS(s,lt));
+ if(EXTRA[i])EXTRA[i](lt,gt);
+ if(TEXTS[i])TEXTS[i].forEach(T=>writeText(T.s,T.x,T.y,T.size,T.color,lt,T.start));
+ ctx.restore();
+}
+
+// حدود الفرشاة للانتقال (الكتابة من اليمين)
+function brushClip(p){
+ return ()=>{
+  const bx=W*(1-p);
+  ctx.beginPath();ctx.moveTo(W+10,-10);
+  for(let y=0;y<=H;y+=40){ctx.lineTo(bx+Math.sin(y*.02+p*9)*18,y);}
+  ctx.lineTo(W+10,H+10);ctx.closePath();ctx.clip();
+ };
+}
+let fadeOn=false;
+function render(t){
+ t=clamp(t,0,TOTAL);
+ ctx.setTransform(1,0,0,1,0,0);ctx.globalAlpha=1;
+ ctx.drawImage(PAPERTEX,0,0);
+ let i=0;while(i<N-1&&t>=STARTS[i+1])i++;
+ const lt=t-STARTS[i];
+ const cam=(idx,lt)=>{const z=1+.03*clamp(lt/DUR[idx]);ctx.translate(W/2,H/2);ctx.scale(z,z);ctx.translate(-W/2,-H/2);};
+ if(i>0&&lt<TR){
+  const p=ease(lt/TR);
+  ctx.save();cam(i-1,t-STARTS[i-1]);drawSceneAt(i-1,t-STARTS[i-1],t,null);ctx.restore();
+  // المشهد الجديد يُكشف بحركة فرشاة من اليمين
+  ctx.save();cam(i,lt);drawSceneAt(i,lt,t,brushClip(p));ctx.restore();
+ }else{
+  ctx.save();cam(i,lt);drawSceneAt(i,lt,t,null);ctx.restore();
+ }
+ // تلاشي البداية والنهاية
+ let black=0;
+ if(fadeOn&&t<.6)black=1-t/.6;
+ if(t>TOTAL-1)black=Math.max(black,(t-(TOTAL-1))/1);
+ if(black>0){ctx.fillStyle=`rgba(40,30,15,${black})`;ctx.fillRect(0,0,W,H);}
+}
+
+/* ================= التشغيل ================= */
+const playBtn=document.getElementById('play'),resetBtn=document.getElementById('reset');
+const bar=document.getElementById('bar'),clock=document.getElementById('clock'),statusEl=document.getElementById('status');
+let t=0,playing=false,t0=0,raf=0;
+const fmt=s=>String(Math.floor(s/60)).padStart(2,'0')+':'+String(Math.floor(s%60)).padStart(2,'0');
+function updateUI(x){bar.style.width=(x/TOTAL*100)+'%';clock.textContent=fmt(x)+' / '+fmt(TOTAL);}
+function frame(now){
+ if(!playing)return;
+ t=(now-t0)/1000;
+ if(t>=TOTAL){t=TOTAL;render(t);updateUI(t);stop();statusEl.textContent='انتهى العرض';return;}
+ render(t);updateUI(t);raf=requestAnimationFrame(frame);
+}
+function start(){if(t>=TOTAL)t=0;playing=true;fadeOn=true;t0=performance.now()-t*1000;playBtn.textContent='❚❚ إيقاف مؤقت';statusEl.textContent='';raf=requestAnimationFrame(frame);}
+function stop(){playing=false;cancelAnimationFrame(raf);playBtn.textContent='▶ تشغيل';}
+playBtn.onclick=()=>playing?stop():start();
+resetBtn.onclick=()=>{stop();fadeOn=false;t=0;render(0);updateUI(0);statusEl.textContent='تمت الإعادة';};
+// انتظار خط Amiri قبل الرسم الأول
+(async()=>{try{await Promise.race([document.fonts.load('700 90px Amiri'),new Promise(r=>setTimeout(r,2500))]);}catch(e){}render(0);updateUI(0);})();
+</script>
+</body>
+</html>
