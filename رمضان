@@ -1,0 +1,281 @@
+
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>رمضان | شهر الخير</title>
+<style>
+*{box-sizing:border-box}
+body{
+ margin:0;background:#050b19;color:#fff;
+ font-family:Tahoma,Arial,sans-serif;
+ display:flex;align-items:center;justify-content:center;
+ min-height:100vh;padding:12px
+}
+.app{width:min(100%,430px)}
+.video{
+ height:auto;aspect-ratio:9/16;position:relative;
+ overflow:hidden;border:1px solid #d6b765;border-radius:18px;
+ background:radial-gradient(ellipse at 50% 35%,#243a60,#09132c 65%,#030714);
+}
+.stars{position:absolute;inset:0;width:100%;height:100%}
+.moon{
+ position:absolute;top:12%;font-size:90px;color:#ffdf91;
+ text-shadow:0 0 35px #e7b950;
+ animation:float 4s ease-in-out infinite
+}
+.scene{
+ position:absolute;inset:0;padding:25px;
+ display:flex;flex-direction:column;justify-content:center;
+ align-items:center;text-align:center;
+ opacity:0;transition:opacity 1s,transform 1.5s;
+ transform:scale(1.04)
+}
+.scene.active{opacity:1;transform:scale(1)}
+h1{font-size:clamp(27px,7vw,39px);color:#ffe4a0;line-height:1.7}
+p{font-size:20px;line-height:2;color:#fff9e9}
+.art{font-size:80px;filter:drop-shadow(0 0 18px #e4b951);margin:10px}
+.small{position:absolute;bottom:7%;color:#dfc58d;font-size:12px}
+.controls{display:grid;gap:10px;padding-top:12px}
+button{
+ background:#172543;color:white;border:1px solid #c9a755;
+ padding:13px;border-radius:10px;font-size:15px
+}
+.primary{background:#c49a42;color:#10172a;font-weight:bold}
+.row{display:flex;gap:8px}.row button{flex:1}
+.track{height:5px;background:#263450;border-radius:8px;overflow:hidden}
+#bar{height:100%;width:0;background:#ffdf91}
+#status{text-align:center;font-size:13px;color:#f1d99e}
+@keyframes float{50%{transform:translateY(-12px)}}
+</style>
+</head>
+<body>
+<div class="app">
+ <div class="video" id="video">
+  <canvas class="stars" id="stars"></canvas>
+
+  <section class="scene active">
+   <div class="moon">☾</div>
+   <h1 style="margin-top:180px">رمضان<br>شهر الرحمة والنور</h1>
+   <p>يا مرحبا بشهر الخير والبركة</p>
+   <div class="small">RAMADAN KAREEM</div>
+  </section>
+
+  <section class="scene">
+   <div class="art">🏮</div>
+   <h1>نورٌ يملأ القلوب</h1>
+   <p>تهدأ النفوس وتتجدد الأمنيات<br>ويحل الخير في كل مكان</p>
+  </section>
+
+  <section class="scene">
+   <div class="art">۞</div>
+   <h1>شهر القرآن</h1>
+   <p>نقترب من ربنا<br>وتطمئن أرواحنا بالذكر والطاعة</p>
+  </section>
+
+  <section class="scene">
+   <div class="art">🌙</div>
+   <h1>جمعة الأحباب</h1>
+   <p>على مائدة الإفطار<br>تحلو اللحظات وتلتقي القلوب</p>
+  </section>
+
+  <section class="scene">
+   <div class="art">♡</div>
+   <h1>شهر العطاء</h1>
+   <p>الخير يكبر بالمشاركة<br>والفرحة تحلى يوم نعطي غيرنا</p>
+  </section>
+
+  <section class="scene">
+   <div class="art">☪</div>
+   <h1>ليالٍ مباركة</h1>
+   <p>دعوات صادقة وقلوب خاشعة<br>ورجاء برحمة الرحمن</p>
+  </section>
+
+  <section class="scene">
+   <div class="moon">☾</div>
+   <h1 style="margin-top:150px">العشر الأواخر</h1>
+   <p>اللهم بلغنا ليلة القدر<br>واكتب لنا الخير والمغفرة</p>
+  </section>
+
+  <section class="scene">
+   <div class="art">✦</div>
+   <h1>رمضان كريم</h1>
+   <p>تقبل الله منا ومنكم<br>صالح الأعمال</p>
+   <div class="small">كل عام وأنتم بخير</div>
+  </section>
+ </div>
+
+ <div class="controls">
+  <div class="track"><div id="bar"></div></div>
+  <div id="clock" style="text-align:center">00:00 / 01:00</div>
+  <div class="row">
+   <button id="play">▶ تشغيل</button>
+   <button id="reset">↻ إعادة</button>
+  </div>
+
+  <label>إضافة تعليق صوتي سعودي (MP3 أو WAV)</label>
+  <input id="audioFile" type="file" accept="audio/*">
+
+  <label>مستوى الصوت</label>
+  <input id="volume" type="range" min="0" max="1" step=".05" value="1">
+
+  <button class="primary" id="export">تصدير الفيديو لمدة دقيقة</button>
+  <div id="status">جاهز للتشغيل</div>
+  <a id="download" hidden style="color:#ffe4a0;text-align:center;padding:10px">تنزيل الفيديو</a>
+ </div>
+</div>
+
+<script>
+const scenes=[...document.querySelectorAll('.scene')];
+const bar=document.getElementById('bar');
+const clock=document.getElementById('clock');
+const status=document.getElementById('status');
+const playBtn=document.getElementById('play');
+const exportBtn=document.getElementById('export');
+const canvas=document.getElementById('stars');
+const ctx=canvas.getContext('2d');
+const stage=document.getElementById('video');
+let duration=60,elapsed=0,running=false,recording=false;
+let start=0,raf=0,stars=[],audio=null,audioURL=null;
+
+function resize(){
+ const r=stage.getBoundingClientRect();
+ canvas.width=r.width*2;canvas.height=r.height*2;
+ stars=Array.from({length:100},()=>({
+  x:Math.random()*r.width,y:Math.random()*r.height,
+  s:Math.random()*2+.4,p:Math.random()*6
+ }));
+}
+function draw(t){
+ const r=stage.getBoundingClientRect();
+ ctx.setTransform(2,0,0,2,0,0);
+ ctx.clearRect(0,0,r.width,r.height);
+ stars.forEach(s=>{
+  ctx.globalAlpha=.3+.7*(.5+.5*Math.sin(t*2+s.p));
+  ctx.fillStyle='#ffe6a1';
+  ctx.beginPath();ctx.arc(s.x,s.y,s.s,0,7);ctx.fill();
+ });
+ ctx.globalAlpha=1;
+}
+function render(t){
+ elapsed=Math.max(0,Math.min(duration,t));
+ scenes.forEach((s,i)=>s.classList.toggle(
+  'active',i===Math.min(7,Math.floor(elapsed/7.5))
+ ));
+ bar.style.width=elapsed/60*100+'%';
+ const sec=Math.floor(elapsed);
+ clock.textContent='00:'+String(sec).padStart(2,'0')+' / 01:00';
+ draw(elapsed);
+}
+function stop(){
+ running=false;cancelAnimationFrame(raf);
+}
+function tick(now){
+ if(!running)return;
+ elapsed=(now-start)/1000;
+ render(elapsed);
+ if(elapsed>=duration){stop();return}
+ raf=requestAnimationFrame(tick);
+}
+function play(){
+ if(recording)return;
+ if(elapsed>=60)elapsed=0;
+ if(audio){audio.currentTime=elapsed;audio.play().catch(()=>{});}
+ running=true;start=performance.now()-elapsed*1000;
+ raf=requestAnimationFrame(tick);
+}
+function pause(){
+ stop();if(audio)audio.pause();
+}
+playBtn.onclick=()=>running?pause():play();
+document.getElementById('reset').onclick=()=>{
+ if(recording)return;
+ pause();if(audio)audio.currentTime=0;render(0);
+};
+document.getElementById('volume').oninput=e=>{
+ if(audio)audio.volume=Number(e.target.value);
+};
+document.getElementById('audioFile').onchange=e=>{
+ const file=e.target.files[0];if(!file)return;
+ if(audioURL)URL.revokeObjectURL(audioURL);
+ audioURL=URL.createObjectURL(file);
+ if(audio)audio.pause();
+ audio=new Audio(audioURL);
+ audio.volume=Number(document.getElementById('volume').value);
+ status.textContent='تم تحميل الصوت. اضغطي تشغيل للمعاينة.';
+};
+async function exportVideo(){
+ if(recording)return;
+ if(!canvas.captureStream||!window.MediaRecorder){
+  status.textContent='التصدير غير مدعوم في هذا المتصفح. جرّبي Chrome على الكمبيوتر.';
+  return;
+ }
+ const mime=['video/webm;codecs=vp9','video/webm;codecs=vp8','video/webm']
+  .find(m=>MediaRecorder.isTypeSupported(m));
+ if(!mime){status.textContent='صيغة الفيديو غير مدعومة.';return;}
+
+ recording=true;pause();elapsed=0;render(0);
+ exportBtn.disabled=true;playBtn.disabled=true;
+ document.getElementById('reset').disabled=true;
+ const videoStream=canvas.captureStream(30);
+ let mixedStream=videoStream;
+ let audioCtx=null,source=null,dest=null;
+
+ try{
+  if(audio){
+   audio.pause();audio.currentTime=0;
+   audioCtx=new AudioContext();
+   await audioCtx.resume();
+   source=audioCtx.createMediaElementSource(audio);
+   dest=audioCtx.createMediaStreamDestination();
+   source.connect(dest);
+   source.connect(audioCtx.destination);
+   mixedStream=new MediaStream([
+    ...videoStream.getVideoTracks(),
+    ...dest.stream.getAudioTracks()
+   ]);
+  }
+  const chunks=[];
+  const recorder=new MediaRecorder(mixedStream,{mimeType:mime});
+  recorder.ondataavailable=e=>{if(e.data.size)chunks.push(e.data)};
+  recorder.onerror=()=>{status.textContent='حدث خطأ أثناء التصدير.'};
+  recorder.onstop=()=>{
+   const blob=new Blob(chunks,{type:mime});
+   const url=URL.createObjectURL(blob);
+   const link=document.getElementById('download');
+   link.href=url;link.download='ramadan-motion.webm';
+   link.textContent='تنزيل الفيديو ('+(blob.size/1048576).toFixed(1)+' MB)';
+   link.hidden=false;
+   mixedStream.getTracks().forEach(t=>t.stop());
+   if(audioCtx)audioCtx.close();
+   recording=false;exportBtn.disabled=false;
+   playBtn.disabled=false;document.getElementById('reset').disabled=false;
+   status.textContent='اكتمل التصدير. اضغطي تنزيل الفيديو.';
+  };
+  recorder.start(250);
+  if(audio){audio.currentTime=0;await audio.play().catch(()=>{});}
+  const begin=performance.now();
+  function capture(now){
+   if(!recording)return;
+   const t=(now-begin)/1000;
+   render(t);
+   if(t>=60){
+    pause();if(audio)audio.pause();recorder.stop();return;
+   }
+   requestAnimationFrame(capture);
+  }
+  status.textContent='جارٍ التسجيل. اتركي الصفحة مفتوحة لمدة دقيقة.';
+  requestAnimationFrame(capture);
+ }catch(err){
+  recording=false;exportBtn.disabled=false;playBtn.disabled=false;
+  document.getElementById('reset').disabled=false;
+  status.textContent='تعذر التصدير: '+err.message;
+ }
+}
+exportBtn.onclick=exportVideo;
+window.addEventListener('resize',resize);
+resize();render(0);
+</script>
+</body>
+</html>
