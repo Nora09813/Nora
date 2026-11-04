@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>عيد أضحى مبارك | موشن جرافيك</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@700;900&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:#04180f;color:#fff;font-family:Cairo,Tahoma,Arial,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:16px}
+.app{width:min(100%,430px)}
+.video{position:relative;width:100%;aspect-ratio:9/16;overflow:hidden;border:1px solid #d6a53a;border-radius:18px;box-shadow:0 0 40px rgba(214,165,58,.3);background:#04180f}
+#stage{position:absolute;inset:0;width:100%;height:100%;display:block}
+.controls{display:grid;gap:10px;padding-top:14px}
+.track{height:5px;background:#1d3b2f;border-radius:8px;overflow:hidden}
+#bar{height:100%;width:0;background:#e2b84f}
+#clock{text-align:center;font-size:14px;color:#e8d29a}
+.row{display:flex;gap:8px}
+.row button{flex:1}
+button{background:#14402f;color:#fff;border:1px solid #c9a24a;padding:13px;border-radius:10px;font:inherit;font-size:15px;font-weight:700;cursor:pointer}
+#status{text-align:center;font-size:13px;color:#e8d29a;min-height:1.6em}
+</style>
+</head>
+<body>
+<div class="app">
+ <div class="video"><canvas id="stage" aria-label="معاينة فيديو عيد الأضحى"></canvas></div>
+ <div class="controls">
+  <div class="track"><div id="bar"></div></div>
+  <div id="clock">00:00 / 00:52</div>
+  <div class="row">
+   <button id="play">▶ تشغيل</button>
+   <button id="reset">↻ إعادة</button>
+  </div>
+  <div id="status">جاهز للتشغيل</div>
+ </div>
+</div>
+
+<script>
+/* ================= التوقيت ================= */
+const W=1080,H=1920,TR=0.8,TOTAL=52;
+const STARTS=[0,6.5,13,19.5,26,32.5,39,45.5],N=STARTS.length;
+const DUR=STARTS.map((s,i)=>(i<N-1?STARTS[i+1]:TOTAL)-s);
+// أحداث الصوت والبصر معاً
+const EVENTS=[];
+for(let i=1;i<N;i++)EVENTS.push({t:STARTS[i]-0.15,k:'whoosh'});
+[0.8,1.6,2.4,3.2,4.0,4.8].forEach(t=>EVENTS.push({t,k:'shimmer'}));
+[1.0,7.2,13.9,20.5,26.9,33.6].forEach(t=>EVENTS.push({t,k:'chime'}));
+[39.5,40.8,42.1,43.4].forEach(t=>EVENTS.push({t,k:'bell'}));
+EVENTS.push({t:46.0,k:'boom'},{t:47.2,k:'chime'});
+
+/* ================= أدوات ================= */
+let seed=2024;
+const rnd=()=>(seed=(seed*16807)%2147483647)/2147483647;
+const clamp=(x,a=0,b=1)=>Math.min(b,Math.max(a,x));
+const ease=x=>{x=clamp(x);return x*x*(3-2*x)};
+const easeOut=x=>1-Math.pow(1-clamp(x),3);
+const easeOutBack=x=>{x=clamp(x);const c1=1.70158,c3=c1+1;return 1+c3*Math.pow(x-1,3)+c1*Math.pow(x-1,2)};
+const fadeIn=(lt,s,d=1)=>ease((lt-s)/d);
+const lerp=(a,b,k)=>a+(b-a)*k;
+const GOLD_HI='#fff0b3',GOLD='#e2b84f',GOLD_DK='#9c6d1c',CREAM='#fff7e2';
+
+const canvas=document.getElementById('stage');canvas.width=W;canvas.height=H;
+const ctx=canvas.getContext('2d');
+const VIG=document.createElement('canvas');VIG.width=W;VIG.height=H;
+(function(){const v=VIG.getContext('2d');const g=v.createRadialGradient(W/2,H/2,H*.33,W/2,H/2,H*.8);
+ g.addColorStop(0,'rgba(0,0,0,0)');g.addColorStop(1,'rgba(0,0,0,.6)');v.fillStyle=g;v.fillRect(0,0,W,H);})();
+
+const DUST=Array.from({length:110},()=>({x:rnd()*W,y0:rnd()*H,v:14+rnd()*30,r:1+rnd()*2.6,p:rnd()*6.28}));
+const STARS=Array.from({length:70},()=>({x:rnd()*W,y0:rnd()*H,v:120+rnd()*180,s:6+rnd()*14,p:rnd()*6.28}));
+const CROWD=Array.from({length:240},()=>({x:rnd()*W,y:1270+rnd()*430,s:.5+rnd()*.5,p:rnd()*6.28}));
+const TAWAF=Array.from({length:64},(_,i)=>({a:i/64*Math.PI*2+rnd()*.1,s:.8+rnd()*.3}));
+const SPARKS=Array.from({length:40},()=>({an:rnd()*6.283,d:200+rnd()*600,r:2+rnd()*3}));
+
+/* ================= أشكال ================= */
+function ttl(s,x,y,size,fill,o={}){
+ const {a=1,sc=1,dy=0,stroke='#04180f',sw=.14}=o;
+ if(a<=0||sc<=0)return;
+ ctx.save();ctx.globalAlpha*=a;
+ ctx.translate(x,y+dy);ctx.scale(sc,sc);
+ ctx.font=`900 ${size}px Cairo, Tahoma, Arial, sans-serif`;
+ ctx.textAlign='center';ctx.textBaseline='middle';ctx.lineJoin='round';
+ ctx.lineWidth=size*sw;ctx.strokeStyle=stroke;ctx.strokeText(s,0,0);
+ if(fill==='gold'){const g=ctx.createLinearGradient(0,-size*.5,0,size*.5);g.addColorStop(0,GOLD_HI);g.addColorStop(.55,GOLD);g.addColorStop(1,GOLD_DK);ctx.fillStyle=g;}
+ else ctx.fillStyle=fill;
+ ctx.fillText(s,0,0);
+ ctx.restore();
+}
+function sub(s,x,y,size,a=1,dy=0){
+ if(a<=0)return;ctx.save();ctx.globalAlpha*=a;
+ ctx.font=`700 ${size}px Cairo, Tahoma, Arial, sans-serif`;ctx.textAlign='center';ctx.textBaseline='middle';
+ ctx.lineJoin='round';ctx.lineWidth=size*.22;ctx.strokeStyle='rgba(4,24,15,.85)';ctx.strokeText(s,x,y+dy);
+ ctx.fillStyle=CREAM;ctx.fillText(s,x,y+dy);ctx.restore();
+}
+function halo(x,y,r,rgb,a){const g=ctx.createRadialGradient(x,y,0,x,y,r);g.addColorStop(0,`rgba(${rgb},${a})`);g.addColorStop(1,`rgba(${rgb},0)`);ctx.fillStyle=g;ctx.fillRect(x-r,y-r,r*2,r*2);}
+function star4(x,y,s,a){ctx.save();ctx.globalAlpha*=a;ctx.fillStyle=GOLD_HI;ctx.translate(x,y);ctx.beginPath();
+ for(let i=0;i<8;i++){const r=i%2?s*.22:s;const an=i*Math.PI/4;ctx.lineTo(Math.cos(an)*r,Math.sin(an)*r);}
+ ctx.closePath();ctx.fill();ctx.restore();}
+function crescent(cx,cy,r,rot=0,alpha=1){
+ const mb=document.createElement('canvas');mb.width=1000;mb.height=1000;const m=mb.getContext('2d');
+ const g=m.createRadialGradient(420,380,40,500,500,420);g.addColorStop(0,'#fff8dc');g.addColorStop(.55,GOLD);g.addColorStop(1,GOLD_DK);
+ m.fillStyle=g;m.beginPath();m.arc(500,500,400,0,Math.PI*2);m.fill();
+ m.globalCompositeOperation='destination-out';m.beginPath();m.arc(650,440,340,0,Math.PI*2);m.fill();
+ ctx.save();ctx.globalAlpha*=alpha;ctx.translate(cx,cy);ctx.rotate(rot);
+ ctx.shadowColor='rgba(255,220,130,.9)';ctx.shadowBlur=45;
+ ctx.drawImage(mb,-r*1.25,-r*1.25,r*2.5,r*2.5);ctx.restore();
+}
+// شخص مبسّط بأسلوب الرسوم المتحركة (يُستخدم بلون الثوب)
+function person(x,base,s,body,head,gt,ph,opt={}){
+ const sw=Math.sin(gt*(opt.speed||5)+ph);
+ const hop=opt.hop?Math.abs(Math.sin(gt*5+ph))*opt.hop:0;
+ ctx.save();ctx.translate(x,base-hop);ctx.scale(s,s);ctx.lineCap='round';
+ ctx.strokeStyle='#2a2320';ctx.lineWidth=18;
+ ctx.beginPath();ctx.moveTo(-14,-40);ctx.lineTo(-14-sw*12,0);ctx.moveTo(14,-40);ctx.lineTo(14+sw*12,0);ctx.stroke();
+ ctx.fillStyle=body;ctx.beginPath();ctx.moveTo(-34,-110);ctx.lineTo(34,-110);ctx.lineTo(44,-30);ctx.lineTo(-44,-30);ctx.closePath();ctx.fill();
+ ctx.strokeStyle=body;ctx.lineWidth=14;
+ ctx.beginPath();ctx.moveTo(-30,-100);ctx.lineTo(-44-sw*10,-62);ctx.moveTo(30,-100);ctx.lineTo(44+sw*10,-62);ctx.stroke();
+ ctx.fillStyle=head;ctx.beginPath();ctx.arc(0,-134,22,0,Math.PI*2);ctx.fill();
+ if(opt.cap){ctx.fillStyle=opt.cap;ctx.beginPath();ctx.arc(0,-140,23,Math.PI,0);ctx.fill();}
+ ctx.restore();
+}
+function sheep(x,y,s,gt,ph){
+ const bob=Math.abs(Math.sin(gt*4+ph))*3;
+ ctx.save();ctx.translate(x,y-bob);ctx.scale(s,s);
+ ctx.fillStyle='rgba(0,0,0,.18)';ctx.beginPath();ctx.ellipse(0,44,90,14,0,0,Math.PI*2);ctx.fill();
+ ctx.strokeStyle='#4a3b30';ctx.lineWidth=9;ctx.lineCap='round';
+ const st=Math.sin(gt*6+ph)*8;
+ ctx.beginPath();ctx.moveTo(-40,30);ctx.lineTo(-44+st,50);ctx.moveTo(-10,30);ctx.lineTo(-10-st,50);
+ ctx.moveTo(20,30);ctx.lineTo(20+st,50);ctx.moveTo(48,30);ctx.lineTo(48-st,50);ctx.stroke();
+ ctx.fillStyle='#f6f3ec';
+ [[-40,0,36],[0,-18,40],[40,0,36],[-12,16,34],[26,14,32],[-60,6,22]].forEach(([cx,cy,r])=>{ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);ctx.fill();});
+ ctx.fillStyle='#e6e0d4';ctx.beginPath();ctx.arc(20,20,30,0,Math.PI*2);ctx.fill();
+ ctx.fillStyle='#5a4636';ctx.beginPath();ctx.ellipse(-80,-14,22,20,-.2,0,Math.PI*2);ctx.fill();
+ ctx.fillStyle='#111';ctx.beginPath();ctx.arc(-86,-18,3,0,Math.PI*2);ctx.fill();
+ ctx.restore();
+}
+function giftBag(x,y,c,s=1){
+ ctx.save();ctx.translate(x,y);ctx.scale(s,s);
+ ctx.strokeStyle=GOLD;ctx.lineWidth=5;ctx.beginPath();ctx.arc(0,-48,22,Math.PI,0);ctx.stroke();
+ ctx.fillStyle=c;ctx.beginPath();ctx.moveTo(-42,-30);ctx.lineTo(42,-30);ctx.lineTo(50,46);ctx.lineTo(-50,46);ctx.closePath();ctx.fill();
+ ctx.fillStyle=GOLD;ctx.fillRect(-6,-30,12,76);
+ ctx.restore();
+}
+function drawLantern(x,y,s,t){
+ const f=.88+.12*Math.sin(t*7.3);
+ ctx.save();ctx.translate(x,y);ctx.scale(s,s);
+ halo(0,10,170,'255,200,90',.4*f);
+ ctx.beginPath();ctx.ellipse(0,0,50,68,0,0,Math.PI*2);
+ const g=ctx.createRadialGradient(0,-8,4,0,0,76);g.addColorStop(0,'#fff6cf');g.addColorStop(.5,'#ffd36b');g.addColorStop(1,'#a8762a');
+ ctx.fillStyle=g;ctx.fill();ctx.strokeStyle='#7a5a1e';ctx.lineWidth=3;ctx.stroke();
+ ctx.fillStyle='#7a5a1e';ctx.fillRect(-20,-80,40,12);ctx.fillRect(-20,68,40,10);
+ ctx.beginPath();ctx.arc(0,-90,7,0,Math.PI*2);ctx.strokeStyle=GOLD;ctx.lineWidth=4;ctx.stroke();
+ ctx.restore();
+}
+function patternLine(x,y,w,h){
+ // شريط زخرفي ذهبي بمعينات متكررة
+ ctx.save();ctx.beginPath();ctx.rect(x,y,w,h);ctx.clip();
+ const g=ctx.createLinearGradient(0,y,0,y+h);g.addColorStop(0,GOLD_HI);g.addColorStop(.5,GOLD);g.addColorStop(1,GOLD_DK);
+ ctx.fillStyle=g;ctx.fillRect(x,y,w,h);
+ ctx.strokeStyle='rgba(90,55,10,.7)';ctx.lineWidth=2;
+ for(let i=x-h;i<x+w+h;i+=h*.7){ctx.beginPath();ctx.moveTo(i,y+h/2);ctx.lineTo(i+h*.35,y);ctx.lineTo(i+h*.7,y+h/2);ctx.lineTo(i+h*.35,y+h);ctx.closePath();ctx.stroke();}
+ ctx.restore();
+}
+
+/* ================= المشاهد ================= */
+// 1) سماء ليلية وهلال
+function sceneNight(lt,gt){
+ const g=ctx.createLinearGradient(0,0,0,H);g.addColorStop(0,'#03101d');g.addColorStop(.6,'#0b2b3a');g.addColorStop(1,'#1d4a45');
+ ctx.fillStyle=g;ctx.fillRect(-100,-100,W+200,H+200);
+ halo(540,640,520,'255,220,140',.22*fadeIn(lt,0,2));
+ crescent(540,640,150,-.3,fadeIn(lt,0,1.8));
+ // غيوم متحركة
+ for(let i=0;i<4;i++){
+  const cx=((i*330+lt*40+gt*6)%1400)-160,cy=760+i*90;
+  ctx.fillStyle=`rgba(12,36,48,${.55-i*.08})`;
+  ctx.beginPath();ctx.ellipse(cx,cy,380,70,0,0,Math.PI*2);ctx.fill();
+ }
+ STARS.forEach((s,i)=>{const y=(s.y0+gt*s.v)%(H+60)-30;const a=.5+.5*Math.sin(gt*3+s.p);star4(s.x,y,s.s*.6,a);});
+ ttl('أقبل العيد..',540,1160,120,'gold',{a:fadeIn(lt,.6,1),dy:(1-easeOut((lt-.6)/1))*40});
+ sub('وأقبلت معه أجمل الحكايات',540,1290,58,fadeIn(lt,1.6,1));
+}
+// 2) الكعبة المشرفة بأسلوب سينمائي مبسّط
+function sceneKaaba(lt,gt){
+ const g=ctx.createLinearGradient(0,0,0,H);g.addColorStop(0,'#0a1424');g.addColorStop(.6,'#2a2238');g.addColorStop(1,'#5a4026');
+ ctx.fillStyle=g;ctx.fillRect(-100,-100,W+200,H+200);
+ halo(540,1120,640,'255,205,120',.28);
+ // أعمدة الساحة بمنظور
+ for(const x0 of [40,210,870,1040]){
+  ctx.fillStyle='rgba(20,28,50,.85)';ctx.fillRect(x0,760,60,900);
+  patternLine(x0,740,60,20);
+ }
+ // الطائفون (خلفية)
+ const drawT=(front)=>TAWAF.forEach((p,i)=>{
+  const a=p.a+gt*.35;const sy=Math.sin(a);
+  if((sy>0)!==front)return;
+  const x=540+Math.cos(a)*430,y=1180+sy*150;
+  ctx.fillStyle='rgba(255,246,220,.95)';
+  ctx.beginPath();ctx.arc(x,y-20*p.s,6*p.s,0,Math.PI*2);ctx.fill();
+  ctx.fillRect(x-5*p.s,y-14*p.s,10*p.s,18*p.s);
+ });
+ drawT(false);
+ // الكعبة: وجه أمامي + جانب + سقف
+ ctx.fillStyle='#070707';ctx.beginPath();ctx.moveTo(690,960);ctx.lineTo(800,910);ctx.lineTo(800,1250);ctx.lineTo(690,1290);ctx.closePath();ctx.fill();
+ ctx.fillStyle='#262626';ctx.beginPath();ctx.moveTo(390,960);ctx.lineTo(500,910);ctx.lineTo(800,910);ctx.lineTo(690,960);ctx.closePath();ctx.fill();
+ const fg=ctx.createLinearGradient(390,0,690,0);fg.addColorStop(0,'#1a1a1a');fg.addColorStop(1,'#0c0c0c');
+ ctx.fillStyle=fg;ctx.fillRect(390,960,300,330);
+ patternLine(390,1040,300,44);
+ // باب ذهبي
+ ctx.save();ctx.beginPath();ctx.rect(604,1120,64,170);ctx.clip();
+ const dg=ctx.createLinearGradient(604,0,668,0);dg.addColorStop(0,GOLD_DK);dg.addColorStop(.5,GOLD_HI);dg.addColorStop(1,GOLD_DK);
+ ctx.fillStyle=dg;ctx.fillRect(604,1120,64,170);ctx.restore();
+ // إضاءة سينمائية على الوجه
+ const lg=ctx.createLinearGradient(390,960,690,1290);lg.addColorStop(0,'rgba(255,220,140,.12)');lg.addColorStop(1,'rgba(0,0,0,.35)');
+ ctx.fillStyle=lg;ctx.fillRect(390,960,300,330);
+ // أرضية الساحة
+ const fl=ctx.createLinearGradient(0,1290,0,H);fl.addColorStop(0,'#d8b46a');fl.addColorStop(1,'#3a2815');
+ ctx.fillStyle=fl;ctx.fillRect(-100,1290,W+200,H);
+ drawT(true);
+ ttl('لبيك اللهم لبيك',540,520,132,'gold',{a:fadeIn(lt,.5,1),sc:easeOutBack(clamp((lt-.5)/.9))});
+}
+// 3) يوم عرفة
+function sceneArafat(lt,gt){
+ const g=ctx.createLinearGradient(0,0,0,1300);g.addColorStop(0,'#1c2a5e');g.addColorStop(.6,'#c96f4a');g.addColorStop(1,'#f5b465');
+ ctx.fillStyle=g;ctx.fillRect(-100,-100,W+200,1400);
+ const sy=lerp(1420,1190,easeOut(lt/4));
+ halo(540,sy,460,'255,190,110',.5);
+ ctx.fillStyle='#ffe2a0';ctx.beginPath();ctx.arc(540,sy,120,0,Math.PI*2);ctx.fill();
+ // جبل الرحمة بطبقات متحركة
+ const px=lerp(20,-20,lt/6.5);
+ ctx.fillStyle='#6a4632';ctx.beginPath();ctx.moveTo(-200,1290);ctx.lineTo(300+px,1080);ctx.lineTo(560+px,1140);ctx.lineTo(820+px,1040);ctx.lineTo(1300,1290);ctx.closePath();ctx.fill();
+ ctx.fillStyle='#4a2f22';ctx.beginPath();ctx.moveTo(-200,1310);ctx.lineTo(180+px*1.5,1200);ctx.lineTo(560,1260);ctx.lineTo(1300,1190);ctx.lineTo(1300,1330);ctx.lineTo(-200,1330);ctx.closePath();ctx.fill();
+ // أرض
+ ctx.fillStyle='#5b3d2a';ctx.fillRect(-100,1300,W+200,H);
+ // حشود بلباس الإحرام
+ CROWD.slice().sort((a,b)=>a.y-b.y).forEach(c=>{
+  const x=c.x+Math.sin(gt*1.5+c.p)*6;
+  ctx.fillStyle=`rgba(255,250,240,${.7+.25*c.s})`;
+  ctx.beginPath();ctx.arc(x,c.y-22*c.s,6*c.s,0,Math.PI*2);ctx.fill();
+  ctx.fillRect(x-6*c.s,c.y-15*c.s,12*c.s,18*c.s);
+ });
+ ttl('يوم عرفة..',540,470,128,'gold',{a:fadeIn(lt,.4,1),dy:(1-easeOut((lt-.4)/1))*40});
+ sub('يوم الدعاء والرحمة والمغفرة',540,610,60,fadeIn(lt,1.4,1));
+}
+// 4) الأضحية (بدون أي مشاهد ذبح)
+function sceneSheep(lt,gt){
+ const g=ctx.createLinearGradient(0,0,0,1400);g.addColorStop(0,'#7fc8f0');g.addColorStop(.7,'#dff3e0');g.addColorStop(1,'#9bd98a');
+ ctx.fillStyle=g;ctx.fillRect(-100,-100,W+200,1500);
+ halo(820,360,300,'255,240,180',.5);
+ const dx=lerp(-70,70,lt/6.5);
+ ctx.fillStyle='#8fd27a';ctx.beginPath();ctx.moveTo(-100,1230);ctx.quadraticCurveTo(300+dx,1090,620,1200);ctx.quadraticCurveTo(900,1280,W+100,1120);ctx.lineTo(W+100,H);ctx.lineTo(-100,H);ctx.closePath();ctx.fill();
+ ctx.fillStyle='#63b85a';ctx.beginPath();ctx.moveTo(-100,1420);ctx.quadraticCurveTo(400-dx,1300,700,1380);ctx.quadraticCurveTo(900,1420,W+100,1340);ctx.lineTo(W+100,H);ctx.lineTo(-100,H);ctx.closePath();ctx.fill();
+ const shifts=[[220,1560,1.7,0],[640,1640,2.0,1.3],[880,1500,1.2,2.6]];
+ shifts.forEach(([x,y,s,ph])=>sheep(x+dx*(s/2),y,s,gt,ph));
+ // أزهار صغيرة
+ for(let i=0;i<30;i++){const x=(i*97+dx*2)%(W+100)-50,y=1500+(i*53)%380;ctx.fillStyle=i%2?'#fff2a8':'#ffffff';ctx.beginPath();ctx.arc(x,y,4,0,Math.PI*2);ctx.fill();}
+ ttl('ومن شعائر الله..',540,440,112,'gold',{a:fadeIn(lt,.4,1),dy:(1-easeOut((lt-.4)/1))*40,stroke:'#0c3b22'});
+ ttl('الأضحية',540,590,170,'gold',{a:fadeIn(lt,1.4,1),sc:easeOutBack(clamp((lt-1.4)/.9)),stroke:'#0c3b22'});
+}
+// 5) فرحة العيد مع العائلة
+function sceneFamily(lt,gt){
+ const g=ctx.createLinearGradient(0,0,0,H);g.addColorStop(0,'#fbd8a0');g.addColorStop(.6,'#f5b98c');g.addColorStop(1,'#7a4a2c');
+ ctx.fillStyle=g;ctx.fillRect(-100,-100,W+200,H+200);
+ halo(540,1000,600,'255,230,160',.35);
+ // واجهة المنزل
+ ctx.fillStyle='#ead7b4';ctx.fillRect(220,860,640,540);
+ ctx.fillStyle='#4a3323';ctx.beginPath();ctx.moveTo(190,870);ctx.lineTo(540,760);ctx.lineTo(890,870);ctx.closePath();ctx.fill();
+ [[300,930],[660,930]].forEach(([x,y])=>{ctx.fillStyle='#ffd77a';ctx.fillRect(x,y,120,110);ctx.strokeStyle='#8a5d27';ctx.lineWidth=5;ctx.strokeRect(x,y,120,110);});
+ ctx.fillStyle='#6b4226';ctx.beginPath();ctx.moveTo(470,1400);ctx.lineTo(470,1190);ctx.arc(540,1190,70,Math.PI,0);ctx.lineTo(610,1400);ctx.closePath();ctx.fill();
+ ctx.fillStyle='#ffe59a';ctx.beginPath();ctx.moveTo(490,1400);ctx.lineTo(490,1200);ctx.arc(540,1200,50,Math.PI,0);ctx.lineTo(590,1400);ctx.closePath();ctx.fill();
+ ctx.fillStyle='#b98e5a';ctx.fillRect(-100,1400,W+200,H);
+ // العائلة
+ person(330,1420,1.45,'#fdfdfb','#c98a5a',gt,0,{speed:2,cap:'#e2b84f'});
+ person(760,1420,1.4,'#2f4a5e','#8a5a36',gt,1.5,{speed:2});
+ person(470,1560,1.0,'#e8c46a','#e9b48a',gt,3.1,{hop:90});
+ person(620,1580,.95,'#7fc7d9','#dca47a',gt,4.4,{hop:110});
+ giftBag(470,1500,'#c94b5a',.6);giftBag(640,1520,'#3c8fb5',.55);
+ ttl('فرحة تجمعنا..',540,380,118,'gold',{a:fadeIn(lt,.4,1),dy:(1-easeOut((lt-.4)/1))*40,stroke:'#5a2b10'});
+ sub('ومحبة تكبر في قلوبنا',540,520,60,fadeIn(lt,1.4,1));
+}
+// 6) ضيافة العيد
+function sceneHospitality(lt,gt){
+ const g=ctx.createLinearGradient(0,0,0,H);g.addColorStop(0,'#2b1608');g.addColorStop(.7,'#7a4a20');g.addColorStop(1,'#2a1608');
+ ctx.fillStyle=g;ctx.fillRect(-100,-100,W+200,H+200);
+ halo(540,1000,520,'255,170,80',.35);
+ // طاولة
+ const tg=ctx.createLinearGradient(0,1260,0,H);tg.addColorStop(0,'#5a3418');tg.addColorStop(1,'#1e0f05');
+ ctx.fillStyle=tg;ctx.fillRect(-100,1260,W+200,H);
+ // دلّة قهوة
+ const dx=470,dy=1000;
+ const dg=ctx.createLinearGradient(dx-110,0,dx+110,0);dg.addColorStop(0,'#8a5a1c');dg.addColorStop(.5,GOLD_HI);dg.addColorStop(1,'#7a4a12');
+ ctx.fillStyle=dg;ctx.beginPath();ctx.moveTo(dx,dy-150);ctx.bezierCurveTo(dx+120,dy-90,dx+120,dy+150,dx,dy+190);
+ ctx.bezierCurveTo(dx-120,dy+150,dx-120,dy-90,dx,dy-150);ctx.fill();
+ ctx.beginPath();ctx.arc(dx,dy-165,22,Math.PI,0);ctx.fill();
+ ctx.beginPath();ctx.moveTo(dx-100,dy-30);ctx.quadraticCurveTo(dx-190,dy-120,dx-170,dy-200);ctx.lineTo(dx-150,dy-200);ctx.quadraticCurveTo(dx-160,dy-120,dx-80,dy-10);ctx.fill();
+ // فناجين
+ [[700,1220],[840,1220]].forEach(([x,y],i)=>{
+  ctx.fillStyle=GOLD;ctx.beginPath();ctx.ellipse(x,y+60,60,20,0,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle='#e8c46a';ctx.beginPath();ctx.moveTo(x-40,y-30);ctx.lineTo(x+40,y-30);ctx.lineTo(x+30,y+50);ctx.lineTo(x-30,y+50);ctx.closePath();ctx.fill();
+  ctx.fillStyle='#3a1f0c';ctx.beginPath();ctx.ellipse(x,y-30,40,8,0,0,Math.PI*2);ctx.fill();
+ });
+ // تمر وحلويات
+ ctx.fillStyle='#e9d8b0';ctx.beginPath();ctx.ellipse(300,1340,140,36,0,0,Math.PI*2);ctx.fill();
+ for(let i=0;i<7;i++){ctx.fillStyle='#6b2e12';ctx.beginPath();ctx.ellipse(230+i*30,1320-(i%2)*8,22,14,-.3,0,Math.PI*2);ctx.fill();}
+ ['#f2b5c4','#f7e3a1','#b9e3c6'].forEach((c,i)=>{ctx.fillStyle=c;ctx.save();ctx.translate(660+i*60,1340);ctx.rotate(Math.PI/4);ctx.fillRect(-22,-22,44,44);ctx.restore();});
+ // بخار القهوة
+ for(let k=0;k<3;k++){
+  ctx.strokeStyle='rgba(255,240,210,.35)';ctx.lineWidth=5;ctx.beginPath();
+  for(let y=0;y<200;y+=6){const x=dx-60+k*60+Math.sin(y*.03+gt*2+k)*14;y?ctx.lineTo(x,dy-240-y):ctx.moveTo(x,dy-240-y);}
+  ctx.stroke();
+ }
+ ttl('عيدنا كرم..',540,420,120,'gold',{a:fadeIn(lt,.4,1),dy:(1-easeOut((lt-.4)/1))*40,stroke:'#2b1608'});
+ sub('لقاء.. وفرحة',540,560,70,fadeIn(lt,1.4,1));
+}
+// 7) تكبيرات العيد
+function sceneTakbir(lt,gt){
+ const g=ctx.createLinearGradient(0,0,0,H);g.addColorStop(0,'#1b2a5e');g.addColorStop(.55,'#e88f5a');g.addColorStop(.8,'#ffd08a');g.addColorStop(1,'#3a2815');
+ ctx.fillStyle=g;ctx.fillRect(-100,-100,W+200,H+200);
+ halo(540,1300,640,'255,220,140',.4);
+ ctx.fillStyle='#2a1c12';ctx.fillRect(-100,1400,W+200,H);
+ // مسجد بقباب ذهبية
+ const bx=540,base=1400;
+ ctx.fillStyle='#24180f';
+ ctx.fillRect(bx-300,base-340,600,340);
+ ctx.beginPath();ctx.arc(bx,base-340,230,Math.PI,0);ctx.fill();
+ [bx-380,bx+320].forEach(mx=>{ctx.fillRect(mx,base-760,60,760);ctx.beginPath();ctx.moveTo(mx-6,base-760);ctx.lineTo(mx+30,base-880);ctx.lineTo(mx+66,base-760);ctx.fill();});
+ ctx.fillStyle=GOLD;ctx.beginPath();ctx.arc(bx,base-580,40,Math.PI,0);ctx.fill();
+ crescent(bx,base-640,44,0,1);
+ for(let k=-2;k<=2;k++){ctx.fillStyle='rgba(255,210,120,.9)';ctx.beginPath();ctx.arc(bx+k*90,base-160,20,Math.PI,0);ctx.lineTo(bx+k*90+20,base-40);ctx.lineTo(bx+k*90-20,base-40);ctx.fill();}
+ const lines=[
+  ['الله أكبر الله أكبر الله أكبر',88,'gold'],
+  ['لا إله إلا الله',96,CREAM],
+  ['الله أكبر الله أكبر',88,'gold'],
+  ['ولله الحمد',124,'gold']
+ ];
+ lines.forEach(([s,size,f],i)=>{
+  const st=.4+i*1.3,a=fadeIn(lt,st,.8);
+  ttl(s,540,300+i*150,size,f,{a,dy:(1-easeOut((lt-st)/.8))*50,stroke:'#1b0f08'});
+ });
+}
+// 8) الختام
+function sceneEnding(lt,gt){
+ const g=ctx.createLinearGradient(0,0,0,H);g.addColorStop(0,'#0c4a36');g.addColorStop(1,'#03150d');
+ ctx.fillStyle=g;ctx.fillRect(-100,-100,W+200,H+200);
+ halo(540,760,600,'214,170,70',.35);
+ // زخرفة نجمية ثلاثية الأبعاد (تحويل منظوري)
+ for(let k=0;k<3;k++){
+  ctx.save();ctx.translate(540,740);ctx.scale(1,.62);ctx.rotate(gt*(.08+k*.05)*(k%2?-1:1));
+  const R=330-k*80,r=R*.45;
+  ctx.beginPath();for(let i=0;i<16;i++){const rad=i%2?r:R,a=i*Math.PI/8;i?ctx.lineTo(Math.cos(a)*rad,Math.sin(a)*rad):ctx.moveTo(Math.cos(a)*rad,Math.sin(a)*rad);}
+  ctx.closePath();ctx.strokeStyle=`rgba(226,184,79,${.8-k*.2})`;ctx.lineWidth=3;ctx.stroke();
+  ctx.restore();
+ }
+ crescent(540,720,110,-.2,fadeIn(lt,0,1.2));
+ [[150,700],[930,700]].forEach(([x,y],i)=>drawLantern(x,y+Math.sin(gt*1.2+i)*16,1.1,gt+i));
+ ttl('عيد أضحى مبارك',540,1140,124,'gold',{a:fadeIn(lt,.4,1),sc:easeOutBack(clamp((lt-.4)/.9))});
+ sub('تقبل الله منا ومنكم صالح الأعمال',540,1290,50,fadeIn(lt,1.6,1));
+}
+const SCENES=[sceneNight,sceneKaaba,sceneArafat,sceneSheep,sceneFamily,sceneHospitality,sceneTakbir,sceneEnding];
+
+/* ================= التركيب ================= */
+let fadeOn=false;
+function drawSceneAt(i,lt,gt,a,z){
+ if(a<=.001)return;
+ ctx.save();ctx.globalAlpha=a;
+ const zoom=z*(1+.05*clamp(lt/DUR[i]));    // حركة كاميرا تدريجية (اقتراب)
+ ctx.translate(W/2,H/2);ctx.scale(zoom,zoom);ctx.translate(-W/2,-H/2);
+ SCENES[i](lt,gt);
+ ctx.restore();
+}
+function drawFX(t){
+ ctx.save();ctx.globalCompositeOperation='lighter';
+ DUST.forEach(d=>{const y=H-((d.y0+t*d.v)%H),x=d.x+Math.sin(t*.7+d.p)*16;ctx.globalAlpha=.35+.35*Math.sin(t*1.6+d.p);ctx.fillStyle='#ffe7a6';ctx.beginPath();ctx.arc(x,y,d.r,0,Math.PI*2);ctx.fill();});
+ ctx.restore();
+ // وميض انتقالات
+ for(let i=1;i<N;i++){const tau=t-STARTS[i];if(tau<0||tau>.9)continue;
+  ctx.save();ctx.globalCompositeOperation='lighter';ctx.globalAlpha=.4*(1-tau/.9);halo(540,960,700,'255,220,150',1);ctx.restore();}
+}
+function render(t){
+ t=clamp(t,0,TOTAL);
+ ctx.setTransform(1,0,0,1,0,0);ctx.globalAlpha=1;
+ let i=0;while(i<N-1&&t>=STARTS[i+1])i++;
+ const lt=t-STARTS[i];
+ if(i>0&&lt<TR){
+  const k=ease(lt/TR);
+  drawSceneAt(i-1,t-STARTS[i-1],t,1-k,1);
+  drawSceneAt(i,lt,t,k,1+.04*(1-k));
+ }else drawSceneAt(i,lt,t,1,1);
+ drawFX(t);
+ ctx.globalAlpha=1;ctx.drawImage(VIG,0,0);
+ ctx.strokeStyle='rgba(226,184,79,.55)';ctx.lineWidth=4;ctx.strokeRect(30,30,W-60,H-60);
+ let black=0;
+ if(fadeOn&&t<.6)black=1-t/.6;
+ if(t>TOTAL-1)black=Math.max(black,(t-(TOTAL-1))/1);
+ if(black>0){ctx.fillStyle=`rgba(0,0,0,${black})`;ctx.fillRect(0,0,W,H);}
+}
+
+/* ================= التشغيل ================= */
+const playBtn=document.getElementById('play'),resetBtn=document.getElementById('reset');
+const bar=document.getElementById('bar'),clock=document.getElementById('clock'),statusEl=document.getElementById('status');
+let t=0,playing=false,t0=0,raf=0;
+const fmt=s=>String(Math.floor(s/60)).padStart(2,'0')+':'+String(Math.floor(s%60)).padStart(2,'0');
+function updateUI(x){bar.style.width=(x/TOTAL*100)+'%';clock.textContent=fmt(x)+' / '+fmt(TOTAL);}
+function frame(now){
+ if(!playing)return;
+ t=(now-t0)/1000;
+ if(t>=TOTAL){t=TOTAL;render(t);updateUI(t);stop();statusEl.textContent='انتهى العرض';return;}
+ render(t);updateUI(t);raf=requestAnimationFrame(frame);
+}
+function start(){if(t>=TOTAL)t=0;playing=true;fadeOn=true;t0=performance.now()-t*1000;playBtn.textContent='❚❚ إيقاف مؤقت';statusEl.textContent='';raf=requestAnimationFrame(frame);}
+function stop(){playing=false;cancelAnimationFrame(raf);playBtn.textContent='▶ تشغيل';}
+playBtn.onclick=()=>playing?stop():start();
+resetBtn.onclick=()=>{stop();fadeOn=false;t=0;render(0);updateUI(0);statusEl.textContent='تمت الإعادة';};
+render(0);updateUI(0);
+</script>
+</body>
+</html>
