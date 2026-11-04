@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>اليوم الوطني السعودي | ثلاثي الأبعاد</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Amiri:wght@700&family=Cairo:wght@700;900&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r160/three.min.js"></script>
+<style>
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:#efe6cf;color:#2a2a26;font-family:Cairo,Tahoma,Arial,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:16px}
+.app{width:min(100%,430px)}
+.video{position:relative;width:100%;aspect-ratio:9/16;overflow:hidden;border:1px solid #b8892e;border-radius:14px;box-shadow:0 0 30px rgba(0,0,0,.2);background:#f6efdc}
+#stage{position:absolute;inset:0;width:100%;height:100%;display:block}
+.controls{display:grid;gap:10px;padding-top:14px}
+.track{height:5px;background:#d7c9a4;border-radius:8px;overflow:hidden}
+#bar{height:100%;width:0;background:#0c6b3c}
+#clock{text-align:center;font-size:14px;color:#5a5140}
+.row{display:flex;gap:8px}
+.row button{flex:1}
+button{background:#0c6b3c;color:#fff;border:0;padding:13px;border-radius:10px;font:inherit;font-size:15px;font-weight:700;cursor:pointer}
+#status{text-align:center;font-size:13px;color:#5a5140;min-height:1.6em}
+</style>
+</head>
+<body>
+<div class="app">
+ <div class="video"><canvas id="stage" aria-label="معاينة فيديو اليوم الوطني ثلاثي الأبعاد"></canvas></div>
+ <div class="controls">
+  <div class="track"><div id="bar"></div></div>
+  <div id="clock">00:00 / 01:00</div>
+  <div class="row">
+   <button id="play">▶ تشغيل</button>
+   <button id="reset">↻ إعادة</button>
+  </div>
+  <div id="status">جارٍ تحميل المشاهد...</div>
+ </div>
+</div>
+
+<script>
+/* ================= التوقيت ================= */
+const W=1080,H=1920,TOTAL=60,TR=0.9,N=8;
+const STARTS=[0,7.5,15,22.5,30,37.5,45,52.5];
+const DUR=STARTS.map((s,i)=>(i<N-1?STARTS[i+1]:TOTAL)-s);
+const EVENTS=[];
+for(let i=0;i<N;i++){EVENTS.push({t:STARTS[i]+0.2,k:'pen',d:3.4});if(i>0)EVENTS.push({t:STARTS[i]-0.2,k:'brush'});}
+[16.0,17.5,19.0,20.5].forEach(t=>EVENTS.push({t,k:'drum'}));
+EVENTS.push({t:21.6,k:'boom'});
+[46.0,48.0,50.5].forEach(t=>EVENTS.push({t,k:'burst'}));
+EVENTS.push({t:46.2,k:'cheer'},{t:49.0,k:'cheer'});
+EVENTS.push({t:52.6,k:'cymbal'},{t:58.6,k:'boom'});
+
+/* ================= أدوات ================= */
+let seed=1932;
+const rnd=()=>(seed=(seed*16807)%2147483647)/2147483647;
+const clamp=(x,a=0,b=1)=>Math.min(b,Math.max(a,x));
+const lerp=(a,b,k)=>a+(b-a)*k;
+const easeOut=x=>1-Math.pow(1-clamp(x),3);
+const ease=x=>{x=clamp(x);return x*x*(3-2*x)};
+const fadeIn=(lt,s,d)=>ease((lt-s)/d);
+const INK='#2a2a26',GREEN='#0c6b3c',GOLD='#b8892e',PAPER='#f6efdc';
+
+const stage=document.getElementById('stage');stage.width=W;stage.height=H;
+const ctx=stage.getContext('2d');
+const PAPERC=document.createElement('canvas');PAPERC.width=W;PAPERC.height=H;
+(function(){const g=PAPERC.getContext('2d');g.fillStyle=PAPER;g.fillRect(0,0,W,H);
+ const v=g.createRadialGradient(W/2,H/2,H*.3,W/2,H/2,H*.8);v.addColorStop(0,'rgba(0,0,0,0)');v.addColorStop(1,'rgba(90,60,20,.22)');g.fillStyle=v;g.fillRect(0,0,W,H);})();
+
+// لوحات الانتقال
+const SNAP_A=document.createElement('canvas');SNAP_A.width=W;SNAP_A.height=H;
+const SNAP_B=document.createElement('canvas');SNAP_B.width=W;SNAP_B.height=H;
+
+/* ================= Three.js ================= */
+const glc=document.createElement('canvas');glc.width=W;glc.height=H;
+const renderer=new THREE.WebGLRenderer({canvas:glc,antialias:true,alpha:true,preserveDrawingBuffer:true});
+renderer.setPixelRatio(1);renderer.setSize(W,H,false);renderer.setClearColor(0x000000,0);
+const scene=new THREE.Scene();
+const camera=new THREE.PerspectiveCamera(40,W/H,10,9000);
+camera.position.set(0,0,2637);
+scene.add(new THREE.HemisphereLight(0xfff4dc,0x6b5230,1.1));
+const sun=new THREE.DirectionalLight(0xffe2b0,1.6);sun.position.set(-600,900,800);scene.add(sun);
+const fill=new THREE.DirectionalLight(0xcfe6ff,.35);fill.position.set(700,300,-400);scene.add(fill);
+
+const mat=(c,o={})=>new THREE.MeshStandardMaterial({color:c,roughness:o.r??0.75,metalness:o.m??0,emissive:o.e??0x000000,emissiveIntensity:o.ei??1,flatShading:!!o.flat,side:o.side??THREE.FrontSide});
+const G=[];for(let i=0;i<N;i++){G[i]=new THREE.Group();G[i].visible=false;scene.add(G[i]);}
+const UPD=[];for(let i=0;i<N;i++)UPD[i]=()=>{};
+
+// تحويل إحداثيات الصفحة (2D) إلى العالم (3D)
+const X2=x=>x-540, Y2=y=>960-y;
+const MAP=[[180,700],[330,560],[520,520],[700,540],[860,640],[910,800],[860,930],[900,1020],[820,1120],[640,1190],[430,1210],[300,1160],[220,1000],[170,860]];
+function mapShape(s,cx,cy){
+ const sh=new THREE.Shape();
+ MAP.forEach(([x,y],i)=>{const X=(x-540)*s+cx,Y=-(y-860)*s+cy;i?sh.lineTo(X,Y):sh.moveTo(X,Y);});
+ sh.closePath();return sh;
+}
+function mapMesh(s,cx,cy,depth,color){
+ const geo=new THREE.ExtrudeGeometry(mapShape(s,cx,cy),{depth,bevelEnabled:true,bevelSize:4,bevelThickness:6,bevelSegments:2,curveSegments:2});
+ return new THREE.Mesh(geo,mat(color,{r:.55,flat:false}));
+}
+function canvasTex(w,h,draw){const c=document.createElement('canvas');c.width=w;c.height=h;draw(c.getContext('2d'),w,h);const t=new THREE.CanvasTexture(c);t.colorSpace=THREE.SRGBColorSpace;return t;}
+
+// نسيج النوافذ للمباني
+let WIN_TEX=null;
+function makeWindowTex(){
+ return canvasTex(128,128,(g,w,h)=>{
+  g.fillStyle='#8c7550';g.fillRect(0,0,w,h);
+  for(let y=10;y<h-20;y+=36)for(let x=10;x<w-20;x+=32){
+   const lit=Math.random()<.45;g.fillStyle=lit?'#ffe3a0':'#3a3328';g.fillRect(x,y,18,24);
+  }
+ });
+}
+// علم السعودية (مبسّط)
+let FLAG_TEX=null;
+function makeFlagTex(){
+ return canvasTex(768,448,(g,w,h)=>{
+  g.fillStyle=GREEN;g.fillRect(0,0,w,h);
+  g.fillStyle='#fff';g.font=`700 92px Amiri, Tahoma, Arial, sans-serif`;g.textAlign='center';g.textBaseline='middle';
+  g.fillText('لا إله إلا الله',w/2,h*.42);
+  g.fillRect(w*.25,h*.6,w*.5,h*.035);
+ });
+}
+function flag(w,h,x,y,z){
+ const geo=new THREE.PlaneGeometry(w,h,24,8);
+ const base=geo.attributes.position.array.slice();
+ const m=new THREE.Mesh(geo,new THREE.MeshStandardMaterial({map:FLAG_TEX,roughness:.6,side:THREE.DoubleSide}));
+ m.position.set(x,y,z);
+ m.userData.wave=(gt)=>{const p=geo.attributes.position;
+  for(let i=0;i<p.count;i++){const u=(base[i*3]+w/2)/w;p.setZ(i,Math.sin(u*6-gt*4)*w*.03*u);}
+  p.needsUpdate=true;geo.computeVertexNormals();};
+ return m;
+}
+function building(x,z,w,h,d,color){
+ const tex=WIN_TEX.clone();tex.wrapS=tex.wrapT=THREE.RepeatWrapping;tex.repeat.set(w/160,h/160);tex.needsUpdate=true;
+ const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),new THREE.MeshStandardMaterial({color,map:tex,roughness:.8}));
+ m.position.set(x,h/2-720,z);return m;
+}
+function palm(x,z,h){
+ const g=new THREE.Group();
+ const trunk=new THREE.Mesh(new THREE.CylinderGeometry(7,12,h,10),mat(0x7a4a22,{r:.9}));
+ trunk.position.y=h/2;g.add(trunk);
+ for(let k=0;k<8;k++){const a=k/8*Math.PI*2;
+  const f=new THREE.Mesh(new THREE.ConeGeometry(14,170,4),mat(0x1f7a3f,{r:.6}));
+  f.geometry.translate(0,-85,0);
+  f.position.set(0,h,0);
+  f.rotation.set(Math.PI/2.6*Math.cos(a)*0+Math.sin(a)*0.5,a,Math.PI/2-0.5*0);
+  f.rotation.set(0,a,Math.PI/2.4);
+  g.add(f);}
+ g.position.set(x,-740,z);return g;
+}
+function figure(x,z,s,color,raised){
+ const g=new THREE.Group();
+ const body=new THREE.Mesh(new THREE.CylinderGeometry(24*s,36*s,130*s,16),mat(color,{r:.8}));body.position.y=130*s/2;g.add(body);
+ const head=new THREE.Mesh(new THREE.SphereGeometry(22*s,16,12),mat(0xd7a878,{r:.7}));head.position.y=150*s;g.add(head);
+ const ghutra=new THREE.Mesh(new THREE.CylinderGeometry(26*s,26*s,10*s,16),mat(0xf6f1e4,{r:.9}));ghutra.position.y=166*s;g.add(ghutra);
+ for(const sx of[-1,1]){
+  const arm=new THREE.Mesh(new THREE.CylinderGeometry(7*s,7*s,100*s,8),mat(color,{r:.8}));
+  if(raised){arm.position.set(sx*38*s,130*s+30*s,0);arm.rotation.z=-sx*0.25;}
+  else{arm.position.set(sx*38*s,90*s,0);arm.rotation.z=sx*0.12;}
+  g.add(arm);
+ }
+ g.position.set(x,-780,z);
+ return g;
+}
+function fireworkPoints(){
+ const bursts=[[46.0,-600,400,0x0c6b3c],[48.0,600,-100,0xffffff],[50.5,0,-420,0x3a9a66]];
+ const n=bursts.length*70;
+ const geo=new THREE.BufferGeometry();
+ const pos=new Float32Array(n*3);const dirs=[];
+ for(let k=0;k<bursts.length;k++)for(let j=0;j<70;j++){const a=rnd()*Math.PI*2,b=rnd()*Math.PI,v=260+rnd()*380;
+  dirs.push([Math.sin(b)*Math.cos(a)*v,Math.sin(b)*Math.sin(a)*v,Math.cos(b)*v*.5]);}
+ geo.setAttribute('position',new THREE.BufferAttribute(pos,3));
+ const m=new THREE.PointsMaterial({size:14,transparent:true,opacity:1,depthWrite:false,blending:THREE.AdditiveBlending,color:0xffffff,vertexColors:false});
+ const p=new THREE.Points(geo,m);
+ p.userData={bursts,dirs};
+ p.userData.update=(gt)=>{
+  const arr=geo.attributes.position.array;let idx=0;let alpha=0;
+  for(let k=0;k<bursts.length;k++){
+   const [t0,cx,cy,col]=bursts[k];const tau=gt-t0;
+   for(let j=0;j<70;j++){const d=dirs[k*70+j];
+    const tt=Math.max(0,Math.min(tau,1.6));
+    arr[idx*3]=cx+d[0]*tt*0.8;arr[idx*3+1]=cy+d[1]*tt*0.8-300*tt*tt*.5;arr[idx*3+2]=d[2]*tt*.3;idx++;}
+   if(tau>=0&&tau<=1.6)alpha=Math.max(alpha,1-tau/1.6);
+  }
+  geo.attributes.position.needsUpdate=true;
+  m.opacity=alpha;
+ };
+ return p;
+}
+
+/* ================= بناء المشاهد ================= */
+function build(){
+ WIN_TEX=makeWindowTex();FLAG_TEX=makeFlagTex();
+
+ // 0 بداية: خريطة مبثوقة وعلم يتموج
+ {const g=G[0];
+  const map=mapMesh(1,0,0,70,0x3a9a66);g.add(map);
+  const f=flag(460,280,0,-460,60);g.add(f);
+  const sand=new THREE.Mesh(new THREE.CircleGeometry(900,64),mat(0xe9d9b0,{r:1}));sand.rotation.x=-Math.PI/2;sand.position.y=-980;g.add(sand);
+  UPD[0]=(lt,gt)=>{const k=easeOut(lt/3.2);map.position.y=lerp(-420,0,k);map.rotation.x=lerp(-1.2,-0.35,k);map.rotation.y=Math.sin(gt*.4)*.08;f.userData.wave(gt);f.position.y=-460+lerp(-300,0,k)*0;};
+ }
+ // 1 تراث: مباني طينية ونخيل على رمال
+ {const g=G[1];
+  const sandM=new THREE.Mesh(new THREE.PlaneGeometry(2400,1400,40,20),mat(0xd9b987,{r:1}));sandM.rotation.x=-Math.PI/2;sandM.position.y=-760;g.add(sandM);
+  g.add(building(-320,-80,240,380,220,0xb08858));
+  g.add(building(40,-180,300,520,240,0xa27a4c));
+  g.add(building(360,-40,200,300,200,0xb89466));
+  g.add(palm(-480,60,360));g.add(palm(470,120,320));
+  UPD[1]=(lt,gt)=>{};
+ }
+ // 2 توحيد: خريطة صغيرة وعلم وشخص
+ {const g=G[2];
+  const map=mapMesh(.55,0,300,40,0x3a9a66);g.add(map);
+  const f=flag(300,190,0,-80,50);g.add(f);
+  const fig=figure(0,0,1.9,0xf6f1e4,false);g.add(fig);
+  const sand=new THREE.Mesh(new THREE.CircleGeometry(900,64),mat(0xd9b987,{r:1}));sand.rotation.x=-Math.PI/2;sand.position.y=-780;g.add(sand);
+  UPD[2]=(lt,gt)=>{map.rotation.y=Math.sin(gt*.5)*.2;f.userData.wave(gt);fig.rotation.y=Math.sin(gt*.6)*.15;};
+ }
+ // 3 تطور: مدينة
+ {const g=G[3];
+  const cols=[0xe8dcc0,0xd9ccb0,0xc9b48a,0xe0cfa4,0xbfae88,0xd6c6a2,0xcdbb98];
+  const xs=[-430,-300,-170,-40,90,220,350,430];
+  xs.forEach((x,i)=>{const h=260+rnd()*440;g.add(building(x,-100-rnd()*200,96+rnd()*40,h,140,cols[i%cols.length]));});
+  const ground=new THREE.Mesh(new THREE.PlaneGeometry(2400,1400),mat(0x9a8660,{r:1}));ground.rotation.x=-Math.PI/2;ground.position.y=-700;g.add(ground);
+  UPD[3]=(lt,gt)=>{};
+ }
+ // 4 شعب: ثلاث شخصيات وأعلام صغيرة
+ {const g=G[4];
+  const ground=new THREE.Mesh(new THREE.PlaneGeometry(2400,1400),mat(0xbda57a,{r:1}));ground.rotation.x=-Math.PI/2;ground.position.y=-820;g.add(ground);
+  g.add(figure(-260,0,1.25,0xf6f1e4,false));g.add(figure(0,0,1.4,0x3b5a4c,false));g.add(figure(260,0,1.1,0xe6d6b0,false));
+  const kidFlag=flag(120,70,-260+60,-420,50);g.add(kidFlag);
+  UPD[4]=(lt,gt)=>{kidFlag.userData.wave(gt);};
+ }
+ // 5 طبيعة: كثبان ونخيل وجبال
+ {const g=G[5];
+  const dunes=new THREE.Mesh(new THREE.PlaneGeometry(2600,1100,60,24),mat(0xdcb983,{r:1}));dunes.rotation.x=-Math.PI/2;dunes.position.y=-760;g.add(dunes);
+  const base=dunes.geometry.attributes.position.array.slice();
+  for(let i=0;i<3;i++){const c=new THREE.Mesh(new THREE.ConeGeometry(220+i*60,460+i*40,6),mat(0x7a5a3c,{flat:true}));c.position.set(-300+i*300,-520+ i*20,-700);g.add(c);}
+  g.add(palm(-360,0,380));
+  UPD[5]=(lt,gt)=>{const p=dunes.geometry.attributes.position;
+   for(let i=0;i<p.count;i++){p.setZ(i,base[i*3+1]*0+Math.sin(base[i*3]*.004+gt*.8)*14);} p.needsUpdate=true;dunes.geometry.computeVertexNormals();};
+ }
+ // 6 فخر: أشخاص يرفعون الأعلام وألعاب نارية
+ {const g=G[6];
+  const ground=new THREE.Mesh(new THREE.PlaneGeometry(2400,1400),mat(0x9a8660,{r:1}));ground.rotation.x=-Math.PI/2;ground.position.y=-800;g.add(ground);
+  const people=[figure(-300,0,1.3,0xe8d7ad,true),figure(0,0,1.45,0xc7e5d2,true),figure(300,0,1.3,0xe8d7ad,true)];
+  people.forEach(p=>g.add(p));
+  const fw=fireworkPoints();g.add(fw);
+  UPD[6]=(lt,gt)=>{fw.userData.update(gt);people.forEach((p,i)=>p.rotation.y=Math.sin(gt*1.2+i)*.25);};
+ }
+ // 7 نهاية: شعار ثلاثي الأبعاد
+ {const g=G[7];
+  const ring=new THREE.Mesh(new THREE.TorusGeometry(330,8,16,120),mat(GOLD,{m:.6,r:.35}));g.add(ring);
+  const ring2=new THREE.Mesh(new THREE.TorusGeometry(300,4,12,120),mat(GREEN,{r:.5}));g.add(ring2);
+  const star=new THREE.Group();
+  const sh=new THREE.Shape();for(let i=0;i<16;i++){const r=i%2?150:280,a=i*Math.PI/8;i?sh.lineTo(Math.cos(a)*r,Math.sin(a)*r):sh.moveTo(Math.cos(a)*r,Math.sin(a)*r);}sh.closePath();
+  const sm=new THREE.Mesh(new THREE.ExtrudeGeometry(sh,{depth:6,bevelEnabled:false}),mat(GOLD,{m:.5,r:.4}));star.add(sm);g.add(star);
+  const map=mapMesh(.6,0,-120,40,0x3a9a66);g.add(map);
+  const f=flag(260,160,0,30,80);g.add(f);
+  UPD[7]=(lt,gt)=>{star.rotation.z=gt*.12;ring2.rotation.x=Math.sin(gt*.3)*.3;f.userData.wave(gt);map.rotation.y=Math.sin(gt*.4)*.2;};
+ }
+}
+
+/* ================= الكاميرا ================= */
+function cam(i,lt,gt){
+ let p,l;
+ switch(i){
+  case 0: p=[Math.sin(lt*.25)*80,80+lt*5,2637-lt*20];l=[0,0,0];break;
+  case 1: p=[lerp(-260,260,lt/7.5),160,2300];l=[0,-120,0];break;
+  case 2: p=[0,40,2250-lt*30];l=[0,-120,0];break;
+  case 3: p=[lerp(-100,100,lt/7.5),120,2500];l=[0,-120,0];break;
+  case 4: p=[Math.sin(lt*.3)*200,200,2600];l=[0,-150,0];break;
+  case 5: p=[-150+lt*30,150,2500];l=[0,-200,0];break;
+  case 6: p=[0,-80,2500-lt*20];l=[0,-120,0];break;
+  default: p=[0,0,2700-lt*40];l=[0,0,0];
+ }
+ camera.position.set(p[0],p[1],p[2]);camera.lookAt(l[0],l[1],l[2]);
+}
+function renderGL(i,lt,gt){
+ G.forEach((g,k)=>g.visible=(k===i));
+ UPD[i](lt,gt);cam(i,lt,gt);
+ renderer.render(scene,camera);
+}
+
+/* ================= النصوص ================= */
+function writeText(s,x,y,size,color,lt,start,dur=1.4){
+ const p=clamp((lt-start)/dur);if(p<=0)return;
+ ctx.save();ctx.font=`700 ${size}px Amiri, Cairo, Tahoma, Arial, sans-serif`;ctx.textAlign='center';ctx.textBaseline='middle';
+ const w=ctx.measureText(s).width+30,e=easeOut(p);
+ const right=x+w/2,left=right-w*e;
+ ctx.beginPath();ctx.rect(left,y-size,w*e+2,size*2);ctx.clip();
+ ctx.fillStyle=color;ctx.fillText(s,x,y);
+ ctx.restore();
+}
+const TEXTS=[
+ [{s:'هنا بدأت الحكاية..',x:540,y:330,size:92,color:INK,start:4.6},{s:'وهنا نمت الأحلام',x:540,y:460,size:72,color:GREEN,start:6.0}],
+ [{s:'من جذور التاريخ..',x:540,y:330,size:92,color:INK,start:1.3},{s:'بدأت قصة وطن',x:540,y:460,size:72,color:GREEN,start:2.7}],
+ [{s:'على يد المؤسس..',x:540,y:1770,size:90,color:INK,start:2.0},{s:'توحدت الراية',x:540,y:1880,size:72,color:GREEN,start:3.4}],
+ [{s:'طموح لا يتوقف..',x:540,y:330,size:92,color:INK,start:2.3},{s:'ومستقبل نصنعه',x:540,y:460,size:72,color:GREEN,start:3.7}],
+ [{s:'شعب واحد.. وقلب واحد..',x:540,y:330,size:84,color:INK,start:2.8},{s:'وراية واحدة',x:540,y:460,size:72,color:GREEN,start:4.2}],
+ [{s:'أرض العطاء..',x:540,y:330,size:92,color:INK,start:3.3},{s:'وموطن المجد',x:540,y:460,size:72,color:GREEN,start:4.7}],
+ [{s:'عزّنا بطبعنا..',x:540,y:330,size:92,color:INK,start:3.8},{s:'وفخرنا بوطننا',x:540,y:460,size:72,color:GREEN,start:5.2}],
+ [{s:'عزّنا بطبعنا',x:540,y:1380,size:150,color:GREEN,start:3.0},{s:'اليوم الوطني السعودي',x:540,y:1530,size:70,color:INK,start:4.5},{s:'دام عزك يا وطن',x:540,y:1660,size:80,color:GOLD,start:6.1}],
+];
+
+/* ================= التركيب ================= */
+function brushClip(p){
+ return ()=>{
+  const bx=W*(1-p);
+  ctx.beginPath();ctx.moveTo(W+10,-10);
+  for(let y=0;y<=H;y+=40){ctx.lineTo(bx+Math.sin(y*.02+p*9)*18,y);}
+  ctx.lineTo(W+10,H+10);ctx.closePath();ctx.clip();
+ };
+}
+let fadeOn=false;
+function render(t){
+ t=clamp(t,0,TOTAL);
+ ctx.setTransform(1,0,0,1,0,0);ctx.globalAlpha=1;
+ ctx.drawImage(PAPERC,0,0);
+ let i=0;while(i<N-1&&t>=STARTS[i+1])i++;
+ const lt=t-STARTS[i];
+ if(i>0&&lt<TR){
+  const p=ease(lt/TR);
+  renderGL(i-1,t-STARTS[i-1],t);
+  SNAP_A.getContext('2d').clearRect(0,0,W,H);SNAP_A.getContext('2d').drawImage(glc,0,0);
+  renderGL(i,lt,t);
+  SNAP_B.getContext('2d').clearRect(0,0,W,H);SNAP_B.getContext('2d').drawImage(glc,0,0);
+  ctx.drawImage(SNAP_A,0,0);
+  ctx.save();brushClip(p)();ctx.drawImage(SNAP_B,0,0);ctx.restore();
+  TEXTS[i].forEach(T=>writeText(T.s,T.x,T.y,T.size,T.color,lt,T.start));
+ }else{
+  renderGL(i,lt,t);
+  ctx.drawImage(glc,0,0);
+  TEXTS[i].forEach(T=>writeText(T.s,T.x,T.y,T.size,T.color,lt,T.start));
+ }
+ let black=0;
+ if(fadeOn&&t<.6)black=1-t/.6;
+ if(t>TOTAL-1)black=Math.max(black,(t-(TOTAL-1))/1);
+ if(black>0){ctx.fillStyle=`rgba(40,30,15,${black})`;ctx.fillRect(0,0,W,H);}
+}
+
+/* ================= التشغيل ================= */
+const playBtn=document.getElementById('play'),resetBtn=document.getElementById('reset');
+const bar=document.getElementById('bar'),clock=document.getElementById('clock'),statusEl=document.getElementById('status');
+let t=0,playing=false,t0=0,raf=0;
+const fmt=s=>String(Math.floor(s/60)).padStart(2,'0')+':'+String(Math.floor(s%60)).padStart(2,'0');
+function updateUI(x){bar.style.width=(x/TOTAL*100)+'%';clock.textContent=fmt(x)+' / '+fmt(TOTAL);}
+function frame(now){
+ if(!playing)return;
+ t=(now-t0)/1000;
+ if(t>=TOTAL){t=TOTAL;render(t);updateUI(t);stop();statusEl.textContent='انتهى العرض';return;}
+ render(t);updateUI(t);raf=requestAnimationFrame(frame);
+}
+function start(){if(t>=TOTAL)t=0;playing=true;fadeOn=true;t0=performance.now()-t*1000;playBtn.textContent='❚❚ إيقاف مؤقت';statusEl.textContent='';raf=requestAnimationFrame(frame);}
+function stop(){playing=false;cancelAnimationFrame(raf);playBtn.textContent='▶ تشغيل';}
+playBtn.onclick=()=>playing?stop():start();
+resetBtn.onclick=()=>{stop();fadeOn=false;t=0;render(0);updateUI(0);statusEl.textContent='تمت الإعادة';};
+
+// بدء العرض بعد تحميل الخط وThree.js
+(async()=>{
+ try{await Promise.race([document.fonts.load('700 90px Amiri'),new Promise(r=>setTimeout(r,2500))]);}catch(e){}
+ build();render(0);updateUI(0);statusEl.textContent='جاهز للتشغيل';
+})();
+</script>
+</body>
+</html>
